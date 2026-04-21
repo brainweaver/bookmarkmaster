@@ -1035,7 +1035,7 @@ export default function App() {
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <ResultRow icon="🗑️" label="Duplicates Removed" value={cleanupResult.removed} />
                 <ResultRow icon="🔍" label="Missing Descriptions" value={`${cleanupResult.missingFixed} of ${cleanupResult.missingFound}`} dim={cleanupResult.missingFound === 0} />
-                <ResultRow icon="⚠️" label="Not Reachable" value={cleanupResult.notReachable} dim />
+                <ResultRow icon="⚠️" label="Not Reachable" value={cleanupResult.notReachable} />
               </div>
               {cleanupResult.removed === 0 && cleanupResult.missingFound === 0 && cleanupResult.notReachable === 0 && (
                 <p style={{ fontSize: 13, color: "var(--text-3)", margin: 0 }}>Everything looks clean — no duplicates, missing descriptions, or unreachable bookmarks found.</p>
