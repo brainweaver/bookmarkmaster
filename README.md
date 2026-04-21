@@ -48,3 +48,14 @@ npm run build
 
 - `public/manifest.json` is copied into `dist/manifest.json` during build.
 - For extension testing, always load/reload the `dist` directory, not `src`.
+
+## Create Tester Zip
+
+Build and package a shareable zip for local testers:
+
+```bash
+npm run package:testers
+```
+
+This creates `BookmarkMaster-extension.zip` at the project root.
+Testers can extract it and load the `dist` folder via `chrome://extensions` → **Load unpacked**.

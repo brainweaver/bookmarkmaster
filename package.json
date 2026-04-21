@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "build:ext": "tsc -b && vite build && echo '\nExtension built to dist/ — load as unpacked extension in chrome://extensions'",
+    "build:ext": "tsc -b && vite build && echo '\nExtension built to dist/ \u2014 load as unpacked extension in chrome://extensions'",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "package:testers": "npm run build && cd dist && zip -r ../BookmarkMaster-extension.zip ."
   },
   "dependencies": {
     "react": "^19.2.5",
