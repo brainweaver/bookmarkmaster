@@ -218,6 +218,14 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
     setPhase({ kind: "done", message: `Downloaded bookmarks.txt (${exportBookmarks.length} bookmarks).` });
   }
 
+  function handleExportCopy() {
+    const text = exportBookmarks.map((b) => b.url).join("\n");
+    navigator.clipboard
+      .writeText(text)
+      .then(() => setPhase({ kind: "done", message: `Copied ${exportBookmarks.length} URLs to clipboard.` }))
+      .catch(() => setPhase({ kind: "error", message: "Could not copy URLs to clipboard." }));
+  }
+
   function triggerDownload(name: string, content: string, type: string) {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([content], { type }));
@@ -243,7 +251,7 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
     >
       <div style={{
         background: "var(--card)", border: "1px solid var(--border-hover)",
-        borderRadius: 14, padding: 24, width: 500,
+        borderRadius: 14, padding: 24, width: 640,
         maxWidth: "calc(100vw - 40px)",
         display: "flex", flexDirection: "column", gap: 20,
         boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
@@ -407,21 +415,21 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
             />
             <ActionBtn
               icon="🌐"
-              label="From Browser"
+              label="From Browser Export"
               sub="Auto-detect from browser export file"
               onClick={() => openImportFilePicker("browser")}
               disabled={isBusy}
             />
             <ActionBtn
               icon="📂"
-              label="From File (json or txt)"
+              label="From File (Json,HTML,or TXT)"
               sub="Auto-detect JSON, HTML, or plain URLs"
               onClick={() => openImportFilePicker("file")}
               disabled={isBusy}
             />
             <ActionBtn
               icon="📋"
-              label="From Text"
+              label="From Clipboard"
               sub="Paste URLs, one per line"
               onClick={() => setShowTextPaste((v) => !v)}
               disabled={isBusy}
@@ -470,7 +478,7 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
 
         {/* Export section */}{section !== "import" && <>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {/* Header row: EXPORT label + count on left, Filter Tags + copy on right */}
+          {/* Header row: EXPORT label + count on left, Filter Tags on right */}
           <div style={{ display: "flex", alignItems: "center" }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", letterSpacing: "0.07em", textTransform: "uppercase" }}>
               {`Export  ·  ${exportBookmarks.length}${exportFilterTags.length ? `/${bookmarks.length}` : ""} bookmark${exportBookmarks.length !== 1 ? "s" : ""}`}
@@ -545,23 +553,6 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
                 </div>
               )}
             </div>
-            <button
-              title="Copy URLs to clipboard"
-              disabled={exportBookmarks.length === 0}
-              onClick={() => {
-                const text = exportBookmarks.map((b) => b.url).join("\n");
-                navigator.clipboard.writeText(text).then(() => setPhase({ kind: "done", message: `Copied ${exportBookmarks.length} URLs to clipboard.` }));
-              }}
-              style={{
-                background: "none", border: "1px solid var(--border-hover)", borderRadius: 6,
-                color: "var(--text-3)", cursor: exportBookmarks.length === 0 ? "not-allowed" : "pointer",
-                fontSize: 14, padding: "2px 8px", opacity: exportBookmarks.length === 0 ? 0.4 : 1,
-                display: "flex", alignItems: "center", gap: 4, marginLeft: 8, flexShrink: 0,
-              }}
-            >
-              <span>⎘</span>
-              <span style={{ fontSize: 11 }}>Copy</span>
-            </button>
           </div>
           <Row>
             <ActionBtn
@@ -585,6 +576,13 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
               onClick={handleExportTXT}
               disabled={isBusy || exportBookmarks.length === 0}
             />
+            <ActionBtn
+              icon="⎘"
+              label="Copy to Clipboard"
+              sub="Copy URLs to clipboard"
+              onClick={handleExportCopy}
+              disabled={isBusy || exportBookmarks.length === 0}
+            />
           </Row>
         </div>
         </>}
@@ -598,7 +596,7 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
 
 function Row({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
       {children}
     </div>
   );
@@ -614,7 +612,7 @@ function ActionBtn({
       onClick={onClick}
       disabled={disabled}
       style={{
-        flex: 1, minWidth: 130,
+        width: "100%", minWidth: 0,
         display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4,
         padding: "12px 14px", borderRadius: 10,
         background: "var(--surface)", border: "1px solid var(--border-hover)",
