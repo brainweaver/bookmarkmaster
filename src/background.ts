@@ -3,7 +3,7 @@
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "save-bookmark",
-    title: "Save to Bookmark Manager",
+    title: "Save to BookmarkMaster",
     contexts: ["page", "link"],
   });
 });
@@ -25,7 +25,7 @@ chrome.action.onClicked.addListener((tab) => {
   chrome.tabs.create({ url: url.toString() });
 });
 
-// Right-click "Save to Bookmark Manager" on a page or link
+// Right-click "Save to BookmarkMaster" on a page or link
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   const targetUrl = info.linkUrl ?? info.pageUrl ?? "";
   const url = new URL(chrome.runtime.getURL("index.html"));
