@@ -339,14 +339,13 @@ export default function App() {
           title: meta.title || hostname,
           description: meta.description || undefined,
           favicon: meta.favicon || `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`,
-          tags: effectiveSelectedTag ? [effectiveSelectedTag] : [],
+          tags: [],
           addedAt: localDateKey(),
         };
       }));
       const valid = items.filter((x): x is NonNullable<typeof x> => x !== null);
       importBookmarks(valid);
-      const tagNote = effectiveSelectedTag ? ` · tagged "${effectiveSelectedTag}"` : "";
-      setDropResult(`Imported ${valid.length} bookmark${valid.length !== 1 ? "s" : ""}${tagNote}`);
+      setDropResult(`Imported ${valid.length} bookmark${valid.length !== 1 ? "s" : ""}`);
       setTimeout(() => setDropResult(null), 3000);
     } finally {
       setDropLoading(false);
@@ -400,7 +399,7 @@ export default function App() {
           favicon: isWeb
             ? (tab.favIconUrl || `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`)
             : (tab.favIconUrl || ""),
-          tags: effectiveSelectedTag ? [effectiveSelectedTag] : [],
+          tags: [],
           addedAt: localDateKey(),
         });
       }
@@ -415,10 +414,8 @@ export default function App() {
       if (closableIds.length > 0) {
         await chrome.tabs.remove(closableIds);
       }
-
-      const tagNote = effectiveSelectedTag ? ` · tagged "${effectiveSelectedTag}"` : "";
       setDropResult(
-        `Collapsed ${closableIds.length} tab${closableIds.length !== 1 ? "s" : ""} · imported ${items.length} new bookmark${items.length !== 1 ? "s" : ""}${tagNote}`
+        `Collapsed ${closableIds.length} tab${closableIds.length !== 1 ? "s" : ""} · imported ${items.length} new bookmark${items.length !== 1 ? "s" : ""}`
       );
       setTimeout(() => setDropResult(null), 4000);
     } catch {
@@ -443,28 +440,19 @@ export default function App() {
         ? "Not Reachable"
         : selectedTag;
 
-    const source = bookmarks.filter((b) => {
-      const userTags = visibleTags(b.tags);
-      if (selectedTag === NOT_TAGGED_FILTER) return userTags.length === 0;
-      if (selectedTag === NOT_REACHABLE_FILTER) return b.tags.includes(SYSTEM_TAG_NOT_REACHABLE);
-      return b.tags.includes(selectedTag);
-    });
+    // Open exactly what the user is currently seeing in the filtered view,
+    // preserving visible order and exact URL text.
+    const visibleUrls = sorted
+      .map((b) => b.url)
+      .filter((url) => /^https?:\/\//i.test(url));
 
-    const uniqueUrls = Array.from(
-      new Set(
-        source
-          .map((b) => b.url)
-          .filter((url) => /^https?:\/\//i.test(url))
-      )
-    );
-
-    if (uniqueUrls.length === 0) {
+    if (visibleUrls.length === 0) {
       setDropResult(`No links found for ${tagLabel}.`);
       setTimeout(() => setDropResult(null), 3000);
       return;
     }
 
-    const toOpen = uniqueUrls.slice(0, 30);
+    const toOpen = visibleUrls.slice(0, 30);
     const confirmed = window.confirm(
       `We are about to open ${toOpen.length.toLocaleString()} number of links from the ${tagLabel} tag. Continue or Cancel`
     );
