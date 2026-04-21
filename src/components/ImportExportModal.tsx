@@ -2,6 +2,8 @@ import { useRef, useState, useEffect } from "react";
 import type { Bookmark } from "../data/mockBookmarks";
 import { tagColor } from "./BookmarkCard";
 import {
+  chromeNodesToBookmarks,
+  flattenChromeBookmarks,
   parseHTMLBookmarks,
   rawToBookmarks,
 } from "../utils/bookmarkIO";
@@ -146,6 +148,30 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
     }
     setShowTextPaste(false);
     setPasteText("");
+  }
+
+  async function handleImportChrome() {
+    setPhase({ kind: "busy", label: "Reading Chrome bookmarks…" });
+    try {
+      const tree = await chrome.bookmarks.getTree();
+      const all = flattenChromeBookmarks(tree);
+      const items = chromeNodesToBookmarks(all, existingUrls);
+      const skipped = all.filter((n) => !!n.url && existingUrls.has(n.url)).length;
+
+      if (items.length === 0 && skipped === 0) {
+        setPhase({ kind: "done", message: "No bookmarks found in Chrome." });
+        return;
+      }
+
+      setPhase({
+        kind: "preview",
+        source: "Chrome bookmarks",
+        items,
+        skipped,
+      });
+    } catch {
+      setPhase({ kind: "error", message: "Could not read Chrome bookmarks." });
+    }
   }
 
   function confirmImport() {
@@ -372,6 +398,13 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
           </div>
 
           <Row>
+            <ActionBtn
+              icon="⭐"
+              label="From Chrome Bookmarks"
+              sub="Import directly from this browser"
+              onClick={handleImportChrome}
+              disabled={isBusy}
+            />
             <ActionBtn
               icon="🌐"
               label="From Browser"

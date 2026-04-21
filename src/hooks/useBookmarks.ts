@@ -169,6 +169,20 @@ export function useBookmarks() {
     });
   }, []);
 
+
+
+  const replaceCustomTags = useCallback((next: string[]) => {
+    const normalized = Array.from(
+      new Set(
+        next
+          .map((t) => t.trim().toLowerCase().replace(/\s+/g, "-"))
+          .filter(Boolean)
+      )
+    ).sort();
+    setCustomTags(normalized);
+    saveCustomTags(normalized);
+  }, []);
+
   const allTags = useMemo(
     () => Array.from(new Set([...bookmarks.flatMap((b) => visibleTags(b.tags)), ...customTags])).sort(),
     [bookmarks, customTags]
@@ -186,5 +200,5 @@ export function useBookmarks() {
     setBookmarks([...next]);
   }, []);
 
-  return { bookmarks, addBookmark, updateBookmark, removeBookmark, importBookmarks, renameTag, deleteTag, addTag, replaceBookmarks, patchBookmark, allTags };
+  return { bookmarks, customTags, addBookmark, updateBookmark, removeBookmark, importBookmarks, renameTag, deleteTag, addTag, replaceBookmarks, replaceCustomTags, patchBookmark, allTags };
 }

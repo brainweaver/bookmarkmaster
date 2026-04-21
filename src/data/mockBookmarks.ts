@@ -15,7 +15,7 @@ export const MOCK_BOOKMARKS: Bookmark[] = [
     id: "1",
     title: "GitHub",
     url: "https://github.com",
-    tags: ["dev", "code"],
+    tags: ["dashboard", "dev", "code"],
     favicon: "https://github.com/favicon.ico",
     addedAt: "2026-04-20",
   },

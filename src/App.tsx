@@ -28,11 +28,37 @@ type ModalState =
   | { mode: "add"; prefill?: { url: string; title: string; favicon: string; description?: string } }
   | { mode: "edit"; bookmark: Bookmark };
 
+
+type BackupPreferences = {
+  theme?: ThemeId;
+  displayMode?: DisplayMode;
+  groupByDate?: boolean;
+  sortBy?: "date" | "name" | "ranking";
+  zoom?: number;
+  tagOrder?: string[];
+  sidebarOpen?: boolean;
+};
+
+type BackupPayloadV2 = {
+  version: 2;
+  bookmarks: Bookmark[];
+  customTags: string[];
+  preferences: BackupPreferences;
+};
+
 const PREF_THEME_KEY = "ui_theme_v1";
 const PREF_DISPLAY_MODE_KEY = "ui_display_mode_v1";
 const PREF_GROUP_BY_DATE_KEY = "ui_group_by_date_v1";
 const PREF_SORT_BY_KEY = "ui_sort_by_v1";
 const PREF_ZOOM_KEY = "ui_zoom_v1";
+const THEME_CYCLE = ["white", "gray", "red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "brown", "white-mid", "gray-mid", "red-mid", "orange-mid", "yellow-mid", "green-mid", "cyan-mid", "blue-mid", "purple-mid", "pink-mid", "brown-mid", "black", "white-night", "gray-night", "red-night", "orange-night", "yellow-night", "green-night", "cyan-night", "blue-night", "purple-night", "pink-night", "brown-night", "dark", "midnight", "ocean", "dusk", "slate-night", "sapphire-night", "indigo-deep", "teal-night", "graphite", "high-contrast"] as const;
+type ThemeId = typeof THEME_CYCLE[number];
+const DARK_THEME_IDS = new Set<ThemeId>(["black", "white-night", "gray-night", "red-night", "orange-night", "yellow-night", "green-night", "cyan-night", "blue-night", "purple-night", "pink-night", "brown-night", "dark", "midnight", "ocean", "dusk", "slate-night", "sapphire-night", "indigo-deep", "teal-night", "graphite", "high-contrast"]);
+
+function nextTheme(current: ThemeId): ThemeId {
+  const idx = THEME_CYCLE.indexOf(current);
+  return THEME_CYCLE[(idx + 1) % THEME_CYCLE.length];
+}
 
 function normaliseUrlForDedupe(rawUrl: string): string {
   try {
@@ -64,12 +90,12 @@ function preferCanonicalUrl(a: string, b: string): string {
   return a;
 }
 
-function loadTheme(): "dark" | "light" {
+function loadTheme(): ThemeId {
   try {
     const raw = localStorage.getItem(PREF_THEME_KEY);
-    return raw === "dark" || raw === "light" ? raw : "light";
+    return THEME_CYCLE.includes(raw as ThemeId) ? (raw as ThemeId) : "white";
   } catch {
-    return "light";
+    return "white";
   }
 }
 
@@ -124,11 +150,11 @@ function loadTagOrder(): string[] {
 }
 
 export default function App() {
-  const { bookmarks, addBookmark, updateBookmark, removeBookmark, importBookmarks, renameTag, deleteTag, addTag, replaceBookmarks, allTags } = useBookmarks();
+  const { bookmarks, customTags, addBookmark, updateBookmark, removeBookmark, importBookmarks, renameTag, deleteTag, addTag, replaceBookmarks, replaceCustomTags, allTags } = useBookmarks();
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
 
-  const [theme, setTheme] = useState<"dark" | "light">(loadTheme);
+  const [theme, setTheme] = useState<ThemeId>(loadTheme);
   const [displayMode, setDisplayMode] = useState<DisplayMode>(loadDisplayMode);
   const [groupByDate, setGroupByDate] = useState(loadGroupByDate);
   const [zoom, setZoom] = useState(loadZoom);
@@ -380,7 +406,21 @@ export default function App() {
   };
 
   const handleBackup = () => {
-    const data = JSON.stringify(bookmarks, null, 2);
+    const payload: BackupPayloadV2 = {
+      version: 2,
+      bookmarks,
+      customTags,
+      preferences: {
+        theme,
+        displayMode,
+        groupByDate,
+        sortBy,
+        zoom,
+        tagOrder,
+        sidebarOpen,
+      },
+    };
+    const data = JSON.stringify(payload, null, 2);
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([data], { type: "application/json" }));
     a.download = `bookmarks-backup-${localDateKey()}.json`;
@@ -396,11 +436,40 @@ export default function App() {
     reader.onload = (ev) => {
       try {
         const parsed = JSON.parse(ev.target?.result as string);
-        if (!Array.isArray(parsed)) throw new Error("Not an array");
-        if (!window.confirm(`Restore ${parsed.length} bookmarks? This will replace your current library.`)) return;
-        replaceBookmarks(parsed);
+
+        // Backward-compatible: legacy backups were bookmark arrays only.
+        if (Array.isArray(parsed)) {
+          if (!window.confirm(`Restore ${parsed.length} bookmarks? This will replace your current library.`)) return;
+          replaceBookmarks(parsed);
+          return;
+        }
+
+        if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.bookmarks)) {
+          throw new Error("Invalid backup format");
+        }
+
+        const payload = parsed as Partial<BackupPayloadV2>;
+        const count = payload.bookmarks?.length ?? 0;
+        if (!window.confirm(`Restore ${count} bookmarks and settings? This will replace your current library and preferences.`)) return;
+
+        replaceBookmarks(payload.bookmarks ?? []);
+
+        if (Array.isArray(payload.customTags)) {
+          replaceCustomTags(payload.customTags);
+        }
+
+        const prefs = payload.preferences;
+        if (prefs && typeof prefs === "object") {
+          if (prefs.theme && THEME_CYCLE.includes(prefs.theme)) setTheme(prefs.theme);
+          if (prefs.displayMode === "grid" || prefs.displayMode === "list" || prefs.displayMode === "preview") setDisplayMode(prefs.displayMode);
+          if (typeof prefs.groupByDate === "boolean") setGroupByDate(prefs.groupByDate);
+          if (prefs.sortBy === "date" || prefs.sortBy === "name" || prefs.sortBy === "ranking") setSortBy(prefs.sortBy);
+          if (typeof prefs.zoom === "number" && Number.isFinite(prefs.zoom)) setZoom(Math.max(1, Math.min(5, prefs.zoom)));
+          if (Array.isArray(prefs.tagOrder)) setTagOrder(prefs.tagOrder.filter((t): t is string => typeof t === "string"));
+          if (typeof prefs.sidebarOpen === "boolean") setSidebarOpen(prefs.sidebarOpen);
+        }
       } catch {
-        alert("Could not read backup file — make sure it's a valid bookmarks JSON.");
+        alert("Could not read backup file — make sure it's a valid bookmarks backup JSON.");
       }
     };
     reader.readAsText(file);
@@ -619,16 +688,16 @@ export default function App() {
               <IconSidebar flipped={!sidebarOpen} />
             </button>
             <button
-              onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}
-              title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              onClick={() => setTheme((t) => nextTheme(t))}
+              title={`Switch color theme (${theme})`}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
                 width: 28, height: 28, borderRadius: 7, border: "none",
-                background: "var(--card)", color: "var(--text-2)",
+                background: "var(--card)", color: "var(--theme-icon-color, var(--text-2))",
                 cursor: "pointer", flexShrink: 0,
               }}
             >
-              {theme === "dark" ? <IconSun /> : <IconMoon />}
+              {DARK_THEME_IDS.has(theme) ? <IconMoon /> : <IconSun />}
             </button>
             <a href="https://www.bookmarkmaster.com" target="_blank" rel="noreferrer"
               style={{ fontSize: 15, fontWeight: 700, marginRight: 4, color: "var(--text)", textDecoration: "none" }}
@@ -1210,7 +1279,7 @@ function IconCalendar() {
 function IconSun() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="5" />
+      <circle cx="12" cy="12" r="5" fill="none" />
       <line x1="12" y1="1" x2="12" y2="3" />
       <line x1="12" y1="21" x2="12" y2="23" />
       <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
