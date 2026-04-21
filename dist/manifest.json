@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Bookmark Manager",
+  "description": "Save and organize bookmarks with tags, search, and multiple views",
+  "version": "1.0.0",
+  "permissions": ["storage", "tabs", "activeTab", "contextMenus", "bookmarks"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Bookmark Manager"
+  }
+}

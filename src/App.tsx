@@ -335,6 +335,34 @@ export default function App() {
     );
   };
 
+  const handleReorderBookmark = (draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return;
+    const visualOrder = sorted.map((b) => b.id);
+    const from = visualOrder.indexOf(draggedId);
+    const to = visualOrder.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+
+    const nextVisible = [...visualOrder];
+    nextVisible.splice(from, 1);
+    nextVisible.splice(to, 0, draggedId);
+
+    const hiddenIds = bookmarks
+      .map((b) => b.id)
+      .filter((id) => !nextVisible.includes(id));
+    const finalOrder = [...nextVisible, ...hiddenIds];
+    const total = finalOrder.length;
+    const rankingMap = new Map(finalOrder.map((id, idx) => [id, total - idx]));
+
+    replaceBookmarks(
+      bookmarks.map((b) => ({
+        ...b,
+        ranking: rankingMap.get(b.id) ?? b.ranking ?? 0,
+      }))
+    );
+    setSortBy("ranking");
+    setGroupByDate(false);
+  };
+
   const handleReorderSidebarTag = (draggedTag: string, targetTag: string) => {
     if (draggedTag === targetTag) return;
     const next = [...orderedSidebarTags];
@@ -749,6 +777,7 @@ export default function App() {
                   onEdit={(b) => setModal({ mode: "edit", bookmark: b })}
                   onDelete={handleDelete}
                   onDragStartBookmark={handleBookmarkDragStart}
+                  onDropBookmarkOnBookmark={handleReorderBookmark}
                   showPreview={displayMode === "preview"}
                   groupByDate={effectiveGroupByDate}
                   deleteConfirmId={deleteConfirm}
@@ -765,6 +794,7 @@ export default function App() {
                         onEdit={() => setModal({ mode: "edit", bookmark: b })}
                         onDelete={() => handleDelete(b.id)}
                         onDragStartBookmark={handleBookmarkDragStart}
+                        onDropBookmarkOnBookmark={handleReorderBookmark}
                         showPreview={displayMode === "preview"}
                         deleteConfirming={deleteConfirm === b.id}
                       />

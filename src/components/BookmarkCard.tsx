@@ -38,6 +38,7 @@ interface Props {
   onEdit: () => void;
   onDelete: () => void;
   onDragStartBookmark: (bookmarkId: string, e: React.DragEvent) => void;
+  onDropBookmarkOnBookmark?: (draggedId: string, targetId: string) => void;
   showPreview?: boolean;
   deleteConfirming?: boolean;
 }
@@ -49,6 +50,7 @@ export default function BookmarkCard({
   onEdit,
   onDelete,
   onDragStartBookmark,
+  onDropBookmarkOnBookmark,
   showPreview = false,
   deleteConfirming = false,
 }: Props) {
@@ -57,6 +59,7 @@ export default function BookmarkCard({
   const [previewLoaded, setPreviewLoaded] = useState(false);
   const [previewSrc, setPreviewSrc] = useState(() => previewUrl(bookmark.url));
   const [hovered, setHovered] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
 
   const faviconSize = 14 + zoom * 4;
   const titleSize = 11 + zoom * 2;
@@ -80,6 +83,22 @@ export default function BookmarkCard({
       onMouseLeave={() => setHovered(false)}
       draggable
       onDragStart={(e) => onDragStartBookmark(bookmark.id, e)}
+      onDragOver={(e) => {
+        if (!onDropBookmarkOnBookmark) return;
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        if (!onDropBookmarkOnBookmark) return;
+        e.preventDefault();
+        setDragOver(false);
+        const draggedId =
+          e.dataTransfer.getData("application/x-bookmark-id") ||
+          e.dataTransfer.getData("text/plain").replace(/^bookmark:/, "");
+        if (!draggedId) return;
+        onDropBookmarkOnBookmark(draggedId, bookmark.id);
+      }}
     >
       <a
         href={bookmark.url}
@@ -90,7 +109,7 @@ export default function BookmarkCard({
           flexDirection: "column",
           background: "var(--card)",
           borderRadius: 10,
-          border: `1px solid ${hovered ? "var(--border-hover)" : "var(--border)"}`,
+          border: `1px solid ${dragOver ? "#3b82f6" : hovered ? "var(--border-hover)" : "var(--border)"}`,
           textDecoration: "none",
           color: "inherit",
           overflow: "hidden",

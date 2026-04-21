@@ -14,13 +14,14 @@ interface Props {
   onEdit: (b: Bookmark) => void;
   onDelete: (id: string) => void;
   onDragStartBookmark: (bookmarkId: string, e: React.DragEvent) => void;
+  onDropBookmarkOnBookmark?: (draggedId: string, targetId: string) => void;
   showPreview: boolean;
   groupByDate: boolean;
   deleteConfirmId: string | null;
 }
 
 export default function TimelineView({
-  bookmarks, zoom, onTagClick, onEdit, onDelete, onDragStartBookmark, showPreview, groupByDate, deleteConfirmId,
+  bookmarks, zoom, onTagClick, onEdit, onDelete, onDragStartBookmark, onDropBookmarkOnBookmark, showPreview, groupByDate, deleteConfirmId,
 }: Props) {
   const columns = gridColumnsFromZoom(zoom);
   if (bookmarks.length === 0) return null;
@@ -36,6 +37,7 @@ export default function TimelineView({
           onEdit={() => onEdit(b)}
           onDelete={() => onDelete(b.id)}
           onDragStartBookmark={onDragStartBookmark}
+          onDropBookmarkOnBookmark={onDropBookmarkOnBookmark}
           showPreview={showPreview}
           deleteConfirming={deleteConfirmId === b.id}
         />
