@@ -68,6 +68,8 @@ export default function BookmarkCard({
   const showUrl = zoom >= 2;
   const bodyPad = showPreview ? `${8 + zoom * 2}px` : `${8 + zoom * 3}px`;
   const previewHeight = (82 + zoom * 34) * 1.4;
+  const gridCardHeight = 124 + zoom * 22;
+  const titleClampLines = showPreview ? 2 : 2;
   const initial = bookmark.title[0]?.toUpperCase() ?? "?";
 
   useEffect(() => {
@@ -78,7 +80,7 @@ export default function BookmarkCard({
 
   return (
     <div
-      style={{ position: "relative" }}
+      style={{ position: "relative", width: "100%", minWidth: 0 }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       draggable
@@ -107,6 +109,8 @@ export default function BookmarkCard({
         style={{
           display: "flex",
           flexDirection: "column",
+          width: "100%",
+          minWidth: 0,
           background: "var(--card)",
           borderRadius: 10,
           border: `1px solid ${dragOver ? "#3b82f6" : hovered ? "var(--border-hover)" : "var(--border)"}`,
@@ -116,6 +120,7 @@ export default function BookmarkCard({
           transition: "border-color 0.15s, box-shadow 0.15s",
           boxShadow: hovered ? "0 4px 20px rgba(0,0,0,0.4)" : "none",
           cursor: "pointer",
+          height: showPreview ? undefined : gridCardHeight,
         }}
       >
         {/* Preview image */}
@@ -174,6 +179,8 @@ export default function BookmarkCard({
             flexDirection: "column",
             gap: zoom >= 3 ? 7 : 4,
             padding: bodyPad,
+            flex: 1,
+            minHeight: 0,
           }}
         >
           {/* Favicon + title */}
@@ -217,7 +224,7 @@ export default function BookmarkCard({
                 minWidth: 0,
                 overflow: "hidden",
                 display: "-webkit-box",
-                WebkitLineClamp: showPreview ? 2 : 3,
+                WebkitLineClamp: titleClampLines,
                 WebkitBoxOrient: "vertical",
               }}
             >
@@ -257,7 +264,7 @@ export default function BookmarkCard({
           )}
 
           {visibleTags(bookmark.tags).length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, overflow: "hidden" }}>
+            <div style={{ display: "flex", flexWrap: "nowrap", gap: 4, overflow: "hidden", minHeight: 22 }}>
               {visibleTags(bookmark.tags).map((tag) => (
                 <span
                   key={tag}

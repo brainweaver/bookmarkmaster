@@ -39,6 +39,30 @@ function normaliseBookmarks(items: Bookmark[]): Bookmark[] {
   }));
 }
 
+function normaliseUrlForImportDedupe(rawUrl: string): string {
+  try {
+    const u = new URL(rawUrl);
+    const hostname = u.hostname.toLowerCase().replace(/^www\./, "");
+    const port =
+      u.port &&
+      !(
+        (u.protocol === "http:" && u.port === "80") ||
+        (u.protocol === "https:" && u.port === "443")
+      )
+        ? `:${u.port}`
+        : "";
+    const path = u.pathname.replace(/\/+$/, "") || "/";
+    return `${hostname}${port}${path}${u.search}`;
+  } catch {
+    return rawUrl
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .replace(/\/+$/, "");
+  }
+}
+
 export function useBookmarks() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(load);
   const [customTags, setCustomTags] = useState<string[]>(loadCustomTags);
@@ -142,13 +166,12 @@ export function useBookmarks() {
   const importBookmarks = useCallback(
     (items: Omit<Bookmark, "id">[]) => {
       const current = load();
-      const normalise = (u: string) => u.toLowerCase().replace(/\/$/, "");
-      const existingUrls = new Set(current.map((b) => normalise(b.url)));
+      const existingUrls = new Set(current.map((b) => normaliseUrlForImportDedupe(b.url)));
       const seen = new Set<string>();
       const fresh: Bookmark[] = [];
       for (const item of items) {
-        const key = normalise(item.url);
-        if (existingUrls.has(key) || seen.has(key)) continue;
+        const key = normaliseUrlForImportDedupe(item.url);
+        if (!key || existingUrls.has(key) || seen.has(key)) continue;
         seen.add(key);
         fresh.push({ ...item, id: crypto.randomUUID() });
       }

@@ -27,7 +27,7 @@ export default function TimelineView({
   if (bookmarks.length === 0) return null;
 
   const renderGrid = (items: Bookmark[]) => (
-    <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: 10 }}>
+    <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: 10 }}>
       {items.map((b) => (
         <BookmarkCard
           key={b.id}

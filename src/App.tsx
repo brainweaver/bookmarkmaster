@@ -169,6 +169,8 @@ export default function App() {
   const newTagRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [dropLoading, setDropLoading] = useState(false);
+  const [collapseTabsLoading, setCollapseTabsLoading] = useState(false);
+  const [expandTabsLoading, setExpandTabsLoading] = useState(false);
   const [cleanupState, setCleanupState] = useState<{ running: boolean; progress: number; total: number }>({ running: false, progress: 0, total: 0 });
   const [cleanupResult, setCleanupResult] = useState<{ removed: number; missingFound: number; missingFixed: number; notReachable: number } | null>(null);
   const [showDataMenu, setShowDataMenu] = useState(false);
@@ -348,6 +350,138 @@ export default function App() {
       setTimeout(() => setDropResult(null), 3000);
     } finally {
       setDropLoading(false);
+    }
+  };
+
+  const handleCollapseTabs = async () => {
+    if (collapseTabsLoading) return;
+    setCollapseTabsLoading(true);
+    try {
+      const tabs = await chrome.tabs.query({ currentWindow: true });
+      const activeTabId = tabs.find((tab) => tab.active)?.id;
+
+      const tabsToCollapse = tabs.filter((tab) => {
+        const url = tab.url ?? "";
+        return (
+          typeof tab.id === "number" &&
+          tab.id !== activeTabId &&
+          !!url &&
+          !url.startsWith("chrome-extension://")
+        );
+      });
+
+      if (tabsToCollapse.length === 0) {
+        setDropResult("No tabs found to collapse in this window.");
+        setTimeout(() => setDropResult(null), 3000);
+        return;
+      }
+
+      const dedupedByUrl = new Map<string, chrome.tabs.Tab>();
+      for (const tab of tabsToCollapse) {
+        const url = tab.url ?? "";
+        if (!url || dedupedByUrl.has(url)) continue;
+        dedupedByUrl.set(url, tab);
+      }
+
+      const existingUrls = new Set(bookmarks.map((b) => b.url));
+      const items: Omit<Bookmark, "id">[] = [];
+      for (const tab of dedupedByUrl.values()) {
+        const url = tab.url ?? "";
+        if (!url || existingUrls.has(url)) continue;
+        const isWeb = /^https?:\/\//i.test(url);
+        let hostname = "";
+        if (isWeb) {
+          try { hostname = new URL(url).hostname; } catch {}
+        }
+        items.push({
+          url,
+          title: tab.title?.trim() || hostname || url,
+          description: undefined,
+          favicon: isWeb
+            ? (tab.favIconUrl || `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`)
+            : (tab.favIconUrl || ""),
+          tags: effectiveSelectedTag ? [effectiveSelectedTag] : [],
+          addedAt: localDateKey(),
+        });
+      }
+
+      if (items.length > 0) {
+        importBookmarks(items);
+      }
+
+      const closableIds = tabsToCollapse
+        .map((tab) => tab.id)
+        .filter((id): id is number => typeof id === "number");
+      if (closableIds.length > 0) {
+        await chrome.tabs.remove(closableIds);
+      }
+
+      const tagNote = effectiveSelectedTag ? ` · tagged "${effectiveSelectedTag}"` : "";
+      setDropResult(
+        `Collapsed ${closableIds.length} tab${closableIds.length !== 1 ? "s" : ""} · imported ${items.length} new bookmark${items.length !== 1 ? "s" : ""}${tagNote}`
+      );
+      setTimeout(() => setDropResult(null), 4000);
+    } catch {
+      setDropResult("Could not collapse tabs right now.");
+      setTimeout(() => setDropResult(null), 3000);
+    } finally {
+      setCollapseTabsLoading(false);
+    }
+  };
+
+  const handleExpandTabs = async () => {
+    if (expandTabsLoading) return;
+    if (!selectedTag) {
+      alert("Please select a tag first.");
+      return;
+    }
+
+    const tagLabel =
+      selectedTag === NOT_TAGGED_FILTER
+        ? "Not Tagged"
+        : selectedTag === NOT_REACHABLE_FILTER
+        ? "Not Reachable"
+        : selectedTag;
+
+    const source = bookmarks.filter((b) => {
+      const userTags = visibleTags(b.tags);
+      if (selectedTag === NOT_TAGGED_FILTER) return userTags.length === 0;
+      if (selectedTag === NOT_REACHABLE_FILTER) return b.tags.includes(SYSTEM_TAG_NOT_REACHABLE);
+      return b.tags.includes(selectedTag);
+    });
+
+    const uniqueUrls = Array.from(
+      new Set(
+        source
+          .map((b) => b.url)
+          .filter((url) => /^https?:\/\//i.test(url))
+      )
+    );
+
+    if (uniqueUrls.length === 0) {
+      setDropResult(`No links found for ${tagLabel}.`);
+      setTimeout(() => setDropResult(null), 3000);
+      return;
+    }
+
+    const toOpen = uniqueUrls.slice(0, 30);
+    const confirmed = window.confirm(
+      `We are about to open ${toOpen.length.toLocaleString()} number of links from the ${tagLabel} tag. Continue or Cancel`
+    );
+    if (!confirmed) return;
+
+    setExpandTabsLoading(true);
+    try {
+      for (const url of toOpen) {
+        await chrome.tabs.create({ url, active: false });
+      }
+      setDropResult(`Opened ${toOpen.length.toLocaleString()} tab${toOpen.length !== 1 ? "s" : ""} from ${tagLabel}.`);
+      setTimeout(() => setDropResult(null), 4000);
+    } catch {
+      setDropResult("Could not open tabs right now.");
+      setTimeout(() => setDropResult(null), 3000);
+    } finally {
+      setExpandTabsLoading(false);
     }
   };
 
@@ -699,6 +833,34 @@ export default function App() {
             >
               {DARK_THEME_IDS.has(theme) ? <IconMoon /> : <IconSun />}
             </button>
+            <button
+              onClick={handleCollapseTabs}
+              title="Collapse tabs to bookmarks"
+              disabled={collapseTabsLoading}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 28, height: 28, borderRadius: 7, border: "none",
+                background: "var(--card)", color: "var(--text-2)",
+                cursor: collapseTabsLoading ? "not-allowed" : "pointer", flexShrink: 0,
+                opacity: collapseTabsLoading ? 0.5 : 1,
+              }}
+            >
+              <IconCollapseTabs />
+            </button>
+            <button
+              onClick={handleExpandTabs}
+              title="Expand selected tag links"
+              disabled={expandTabsLoading || !selectedTag}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 28, height: 28, borderRadius: 7, border: "none",
+                background: "var(--card)", color: "var(--text-2)",
+                cursor: expandTabsLoading || !selectedTag ? "not-allowed" : "pointer", flexShrink: 0,
+                opacity: expandTabsLoading || !selectedTag ? 0.5 : 1,
+              }}
+            >
+              <IconExpandTabs />
+            </button>
             <a href="https://www.bookmarkmaster.com" target="_blank" rel="noreferrer"
               style={{ fontSize: 15, fontWeight: 700, marginRight: 4, color: "var(--text)", textDecoration: "none" }}
               onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
@@ -712,8 +874,8 @@ export default function App() {
               style={{ background: "var(--card)", border: "1px solid var(--border-hover)", borderRadius: 7, padding: "6px 12px", color: "var(--text)", fontSize: 13, outline: "none", width: 220 }}
             />
 
-            <span style={{ fontSize: 12, color: "var(--text-4)", minWidth: 24, textAlign: "right" }}>
-              {sorted.length}
+            <span style={{ fontSize: 12, color: "var(--text-4)", minWidth: 62, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>
+              {sorted.length.toLocaleString()}
             </span>
 
             <Divider />
@@ -858,7 +1020,7 @@ export default function App() {
                   deleteConfirmId={deleteConfirm}
                 />
               ) : (
-                <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: 10 }}>
+                <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: 10 }}>
                   {sorted
                     .map((b) => (
                       <BookmarkCard
@@ -1296,6 +1458,24 @@ function IconMoon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  );
+}
+
+function IconCollapseTabs() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M19 5L5 19" />
+      <path d="M11 19H5V13" />
+    </svg>
+  );
+}
+
+function IconExpandTabs() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 19L19 5" />
+      <path d="M13 5H19V11" />
     </svg>
   );
 }
