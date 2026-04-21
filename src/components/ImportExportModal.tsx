@@ -2,11 +2,8 @@ import { useRef, useState, useEffect } from "react";
 import type { Bookmark } from "../data/mockBookmarks";
 import { tagColor } from "./BookmarkCard";
 import {
-  flattenChromeBookmarks,
-  chromeNodesToBookmarks,
   parseHTMLBookmarks,
   rawToBookmarks,
-  generateHTMLBookmarks,
 } from "../utils/bookmarkIO";
 
 interface Props {
@@ -38,6 +35,7 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
   const tagInputRef = useRef<HTMLInputElement>(null);
   const exportTagInputRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [fileImportSource, setFileImportSource] = useState<"browser" | "file">("file");
   const overlayRef = useRef<HTMLDivElement>(null);
   const existingUrls = new Set(bookmarks.map((b) => b.url));
 
@@ -72,21 +70,37 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
 
   // ── Import ──────────────────────────────────────────────────────────────────
 
-  async function handleImportChrome() {
-    setPhase({ kind: "busy", label: "Reading Chrome bookmarks…" });
+  function openImportFilePicker(source: "browser" | "file") {
+    setFileImportSource(source);
+    fileRef.current?.click();
+  }
+
+  function parseRawFromInputText(text: string): Array<{ title: string; url: string }> {
     try {
-      const tree = await chrome.bookmarks.getTree();
-      const all = flattenChromeBookmarks(tree);
-      const items = chromeNodesToBookmarks(all, existingUrls);
-      const skipped = all.filter((n) => n.url && existingUrls.has(n.url)).length;
-      if (items.length === 0 && skipped === 0) {
-        setPhase({ kind: "done", message: "No bookmarks found in Chrome." });
-      } else {
-        setPhase({ kind: "preview", source: "Chrome bookmarks", items, skipped });
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) {
+        const raw = parsed
+          .map((p) => ({ title: String((p as { title?: unknown }).title ?? ""), url: String((p as { url?: unknown }).url ?? "") }))
+          .filter((r) => r.url.startsWith("http"));
+        if (raw.length > 0) return raw;
       }
-    } catch {
-      setPhase({ kind: "error", message: "Could not read Chrome bookmarks." });
-    }
+    } catch {}
+
+    const htmlRaw = parseHTMLBookmarks(text);
+    if (htmlRaw.length > 0) return htmlRaw;
+
+    return text
+      .split(/[\n\r,\s]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.startsWith("http"))
+      .map((url) => {
+        try {
+          return { title: new URL(url).hostname, url };
+        } catch {
+          return null;
+        }
+      })
+      .filter((v): v is { title: string; url: string } => v !== null);
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -96,30 +110,20 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
 
     const reader = new FileReader();
     reader.onload = (ev) => {
-      const text = ev.target?.result as string;
-      let raw: Array<{ title: string; url: string }>;
-
-      if (file.name.endsWith(".json")) {
-        try {
-          const parsed = JSON.parse(text);
-          raw = Array.isArray(parsed)
-            ? parsed.map((p) => ({ title: String(p.title ?? ""), url: String(p.url ?? "") }))
-            : [];
-        } catch {
-          setPhase({ kind: "error", message: "Could not parse JSON file." });
-          return;
-        }
-      } else {
-        raw = parseHTMLBookmarks(text);
-      }
-
+      const text = String(ev.target?.result ?? "");
+      const raw = parseRawFromInputText(text);
       const items = rawToBookmarks(raw, existingUrls);
       const skipped = raw.filter((r) => existingUrls.has(r.url)).length;
 
       if (items.length === 0 && skipped === 0) {
         setPhase({ kind: "done", message: "No bookmarks found in file." });
       } else {
-        setPhase({ kind: "preview", source: file.name, items, skipped });
+        setPhase({
+          kind: "preview",
+          source: fileImportSource === "browser" ? "browser export file" : file.name,
+          items,
+          skipped,
+        });
       }
     };
     reader.readAsText(file);
@@ -173,13 +177,6 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
       setPhase({ kind: "error", message: "Could not export to Chrome bookmarks." });
     }
   }
-
-  function handleExportHTML() {
-    const html = generateHTMLBookmarks(exportBookmarks);
-    triggerDownload("bookmarks.html", html, "text/html");
-    setPhase({ kind: "done", message: `Downloaded bookmarks.html (${exportBookmarks.length} bookmarks).` });
-  }
-
   function handleExportJSON() {
     triggerDownload(
       "bookmarks.json",
@@ -187,6 +184,12 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
       "application/json"
     );
     setPhase({ kind: "done", message: `Downloaded bookmarks.json (${exportBookmarks.length} bookmarks).` });
+  }
+
+  function handleExportTXT() {
+    const text = exportBookmarks.map((b) => b.url).join("\n");
+    triggerDownload("bookmarks.txt", text, "text/plain");
+    setPhase({ kind: "done", message: `Downloaded bookmarks.txt (${exportBookmarks.length} bookmarks).` });
   }
 
   function triggerDownload(name: string, content: string, type: string) {
@@ -370,22 +373,22 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
 
           <Row>
             <ActionBtn
-              icon="🔖"
-              label="From Chrome bookmarks"
-              sub="Pulls your existing Chrome bookmarks"
-              onClick={handleImportChrome}
+              icon="🌐"
+              label="From Browser"
+              sub="Auto-detect from browser export file"
+              onClick={() => openImportFilePicker("browser")}
               disabled={isBusy}
             />
             <ActionBtn
               icon="📂"
-              label="From file"
-              sub=".html (Netscape format) or .json"
-              onClick={() => fileRef.current?.click()}
+              label="From File (json or txt)"
+              sub="Auto-detect JSON, HTML, or plain URLs"
+              onClick={() => openImportFilePicker("file")}
               disabled={isBusy}
             />
             <ActionBtn
               icon="📋"
-              label="From text"
+              label="From Text"
               sub="Paste URLs, one per line"
               onClick={() => setShowTextPaste((v) => !v)}
               disabled={isBusy}
@@ -422,7 +425,7 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
           <input
             ref={fileRef}
             type="file"
-            accept=".html,.json"
+            accept={fileImportSource === "browser" ? ".html,.json,.txt" : ".json,.txt"}
             style={{ display: "none" }}
             onChange={handleFileChange}
           />
@@ -530,23 +533,23 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
           <Row>
             <ActionBtn
               icon="🔖"
-              label="To Chrome bookmarks"
+              label="To Chrome Bookmarks"
               sub="Adds to Other Bookmarks"
               onClick={handleExportChrome}
               disabled={isBusy || exportBookmarks.length === 0}
             />
             <ActionBtn
-              icon="🌐"
-              label="Download as HTML"
-              sub="Opens in any browser"
-              onClick={handleExportHTML}
+              icon="{}"
+              label="Download As Json"
+              sub="Full data with tags & descriptions"
+              onClick={handleExportJSON}
               disabled={isBusy || exportBookmarks.length === 0}
             />
             <ActionBtn
-              icon="{}"
-              label="Download as JSON"
-              sub="Full data with tags & descriptions"
-              onClick={handleExportJSON}
+              icon="📄"
+              label="Download As Text"
+              sub="One URL per line"
+              onClick={handleExportTXT}
               disabled={isBusy || exportBookmarks.length === 0}
             />
           </Row>

@@ -17,12 +17,14 @@ interface RowProps {
   onEdit: () => void;
   onDelete: () => void;
   onDragStartBookmark: (bookmarkId: string, e: React.DragEvent) => void;
+  onDropBookmarkOnBookmark?: (draggedId: string, targetId: string) => void;
   showPreview: boolean;
   deleteConfirming: boolean;
 }
 
-function ListRow({ bookmark, zoom, onTagClick, onEdit, onDelete, onDragStartBookmark, showPreview, deleteConfirming }: RowProps) {
+function ListRow({ bookmark, zoom, onTagClick, onEdit, onDelete, onDragStartBookmark, onDropBookmarkOnBookmark, showPreview, deleteConfirming }: RowProps) {
   const [hovered, setHovered] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const [previewLoaded, setPreviewLoaded] = useState(false);
   const [previewError, setPreviewError] = useState(false);
   const [faviconError, setFaviconError] = useState(false);
@@ -35,14 +37,31 @@ function ListRow({ bookmark, zoom, onTagClick, onEdit, onDelete, onDragStartBook
       onMouseLeave={() => setHovered(false)}
       draggable
       onDragStart={(e) => onDragStartBookmark(bookmark.id, e)}
+      onDragOver={(e) => {
+        if (!onDropBookmarkOnBookmark) return;
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        if (!onDropBookmarkOnBookmark) return;
+        e.preventDefault();
+        setDragOver(false);
+        const draggedId =
+          e.dataTransfer.getData("application/x-bookmark-id") ||
+          e.dataTransfer.getData("text/plain").replace(/^bookmark:/, "");
+        if (!draggedId) return;
+        onDropBookmarkOnBookmark(draggedId, bookmark.id);
+      }}
       style={{
         display: "flex",
         alignItems: "center",
         gap: 10,
         padding: "7px 12px",
-        background: hovered ? "var(--card)" : "transparent",
+        background: dragOver ? "var(--card)" : hovered ? "var(--card)" : "transparent",
         borderRadius: 8,
-        transition: "background 0.1s",
+        border: `1px solid ${dragOver ? "#3b82f6" : "transparent"}`,
+        transition: "background 0.1s, border-color 0.1s",
         position: "relative",
         minWidth: 0,
       }}
@@ -251,6 +270,7 @@ interface Props {
   onEdit: (b: Bookmark) => void;
   onDelete: (id: string) => void;
   onDragStartBookmark: (bookmarkId: string, e: React.DragEvent) => void;
+  onDropBookmarkOnBookmark?: (draggedId: string, targetId: string) => void;
   showPreview: boolean;
   deleteConfirmId: string | null;
   groupByDate: boolean;
@@ -271,7 +291,7 @@ function formatDateLabel(dateStr: string): string {
   return d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 }
 
-export default function ListView({ bookmarks, zoom, onTagClick, onEdit, onDelete, onDragStartBookmark, showPreview, deleteConfirmId, groupByDate }: Props) {
+export default function ListView({ bookmarks, zoom, onTagClick, onEdit, onDelete, onDragStartBookmark, onDropBookmarkOnBookmark, showPreview, deleteConfirmId, groupByDate }: Props) {
   if (bookmarks.length === 0) return null;
 
   if (!groupByDate) {
@@ -287,6 +307,7 @@ export default function ListView({ bookmarks, zoom, onTagClick, onEdit, onDelete
             onEdit={() => onEdit(b)}
             onDelete={() => onDelete(b.id)}
             onDragStartBookmark={onDragStartBookmark}
+            onDropBookmarkOnBookmark={onDropBookmarkOnBookmark}
             showPreview={showPreview}
             deleteConfirming={deleteConfirmId === b.id}
           />
@@ -318,6 +339,7 @@ export default function ListView({ bookmarks, zoom, onTagClick, onEdit, onDelete
                 onEdit={() => onEdit(b)}
                 onDelete={() => onDelete(b.id)}
                 onDragStartBookmark={onDragStartBookmark}
+                onDropBookmarkOnBookmark={onDropBookmarkOnBookmark}
                 showPreview={showPreview}
                 deleteConfirming={deleteConfirmId === b.id}
               />

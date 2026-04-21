@@ -144,7 +144,7 @@ export default function App() {
   const [dragging, setDragging] = useState(false);
   const [dropLoading, setDropLoading] = useState(false);
   const [cleanupState, setCleanupState] = useState<{ running: boolean; progress: number; total: number }>({ running: false, progress: 0, total: 0 });
-  const [cleanupResult, setCleanupResult] = useState<{ removed: number; missing: number; enriched: number; skipped: number } | null>(null);
+  const [cleanupResult, setCleanupResult] = useState<{ removed: number; missingFound: number; missingFixed: number; notReachable: number } | null>(null);
   const [showDataMenu, setShowDataMenu] = useState(false);
   const dataMenuRef = useRef<HTMLDivElement>(null);
   const restoreFileRef = useRef<HTMLInputElement>(null);
@@ -273,6 +273,7 @@ export default function App() {
   const columns = gridColumnsFromZoom(zoom);
 
   const handleDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME) || e.dataTransfer.types.includes(TAG_DRAG_MIME)) return;
     e.preventDefault();
     setDragging(true);
   };
@@ -284,6 +285,10 @@ export default function App() {
   const [dropResult, setDropResult] = useState<string | null>(null);
 
   const handleDrop = async (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME) || e.dataTransfer.types.includes(TAG_DRAG_MIME)) {
+      setDragging(false);
+      return;
+    }
     e.preventDefault();
     setDragging(false);
     const raw =
@@ -468,14 +473,14 @@ export default function App() {
       }
       setCleanupState((s) => ({ ...s, progress: needsDesc.length + i + 1 }));
     }
-
+    const notReachableCount = nextBookmarks.filter((b) => b.tags.includes(SYSTEM_TAG_NOT_REACHABLE)).length;
     replaceBookmarks(nextBookmarks);
     setCleanupState({ running: false, progress: 0, total: 0 });
     setCleanupResult({
       removed: removedCount,
-      missing: needsDesc.length,
-      enriched: enrichedCount,
-      skipped: needsDesc.length - enrichedCount,
+      missingFound: needsDesc.length,
+      missingFixed: enrichedCount,
+      notReachable: notReachableCount,
     });
   };
 
@@ -653,12 +658,12 @@ export default function App() {
 
             {/* Layer toggles */}
             <ToggleGroup>
-              <ToggleBtn active={groupByDate} onClick={() => setGroupByDate(v => !v)} title="Group by date" icon={<IconCalendar />} />
+              <ToggleBtn active={groupByDate} onClick={() => { setSortBy("date"); setGroupByDate(v => !v); }} title="Group by date" icon={<IconCalendar />} />
             </ToggleGroup>
 
             <select
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+              onChange={(e) => { const next = e.target.value as typeof sortBy; setSortBy(next); if (next !== "date") setGroupByDate(false); }}
               title="Sort order"
               style={{
                 background: "var(--card)", border: "1px solid var(--border-hover)",
@@ -698,14 +703,14 @@ export default function App() {
                   minWidth: 160, boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
                 }}>
                   <DataMenuItem
-                    icon={<img src="/broom.png" alt="" style={{ width: 15, height: 15, opacity: 0.65, filter: "var(--icon-filter)" }} />}
+                    icon={<img src="/broom.png" alt="" style={{ width: 17, height: 17, opacity: 0.65, filter: "var(--icon-filter)" }} />}
                     label="Clean up"
                     disabled={cleanupState.running}
                     onClick={() => { setShowDataMenu(false); handleCleanup(); }}
                   />
                   <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
-                  <DataMenuItem icon={<img src="/file-import.png" alt="" style={{ width: 15, height: 15, opacity: 0.65, filter: "var(--icon-filter)" }} />} label="Import" onClick={() => { setShowDataMenu(false); setShowImport(true); }} />
-                  <DataMenuItem icon={<img src="/import-export.png" alt="" style={{ width: 15, height: 15, opacity: 0.65, filter: "var(--icon-filter)" }} />} label="Export" onClick={() => { setShowDataMenu(false); setShowExport(true); }} />
+                  <DataMenuItem icon={<img src="/file-import.png" alt="" style={{ width: 17, height: 17, opacity: 0.65, filter: "var(--icon-filter)" }} />} label="Import" onClick={() => { setShowDataMenu(false); setShowImport(true); }} />
+                  <DataMenuItem icon={<img src="/import-export.png" alt="" style={{ width: 17, height: 17, opacity: 0.65, filter: "var(--icon-filter)" }} />} label="Export" onClick={() => { setShowDataMenu(false); setShowExport(true); }} />
                   <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
                   <DataMenuItem icon="💾" label="Backup" onClick={() => { setShowDataMenu(false); handleBackup(); }} />
                   <DataMenuItem icon="📂" label="Restore" onClick={() => { setShowDataMenu(false); restoreFileRef.current?.click(); }} />
@@ -763,6 +768,7 @@ export default function App() {
                 onEdit={(b) => setModal({ mode: "edit", bookmark: b })}
                 onDelete={handleDelete}
                 onDragStartBookmark={handleBookmarkDragStart}
+                onDropBookmarkOnBookmark={handleReorderBookmark}
                 showPreview={false}
                 groupByDate={effectiveGroupByDate}
                 deleteConfirmId={deleteConfirm}
@@ -1027,13 +1033,12 @@ export default function App() {
                 <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", margin: 0 }}>Clean up complete</h2>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <ResultRow icon="🗑️" label="Duplicates removed" value={cleanupResult.removed} />
-                <ResultRow icon="🔍" label="Missing descriptions found" value={cleanupResult.missing} />
-                <ResultRow icon="📝" label="Descriptions filled" value={cleanupResult.enriched} />
-                <ResultRow icon="⚠️" label="Still missing (could not fetch)" value={cleanupResult.skipped} dim />
+                <ResultRow icon="🗑️" label="Duplicates Removed" value={cleanupResult.removed} />
+                <ResultRow icon="🔍" label="Missing Descriptions" value={`${cleanupResult.missingFixed} of ${cleanupResult.missingFound}`} dim={cleanupResult.missingFound === 0} />
+                <ResultRow icon="⚠️" label="Not Reachable" value={cleanupResult.notReachable} dim />
               </div>
-              {cleanupResult.removed === 0 && cleanupResult.missing === 0 && (
-                <p style={{ fontSize: 13, color: "var(--text-3)", margin: 0 }}>Everything looks clean — no duplicates or missing descriptions found.</p>
+              {cleanupResult.removed === 0 && cleanupResult.missingFound === 0 && cleanupResult.notReachable === 0 && (
+                <p style={{ fontSize: 13, color: "var(--text-3)", margin: 0 }}>Everything looks clean — no duplicates, missing descriptions, or unreachable bookmarks found.</p>
               )}
               <button
                 onClick={() => setCleanupResult(null)}
@@ -1053,12 +1058,12 @@ export default function App() {
   );
 }
 
-function ResultRow({ icon, label, value, dim }: { icon: string; label: string; value: number; dim?: boolean }) {
+function ResultRow({ icon, label, value, dim }: { icon: string; label: string; value: number | string; dim?: boolean }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, opacity: dim && value === 0 ? 0.3 : 1 }}>
       <span style={{ fontSize: 16, width: 24, textAlign: "center" }}>{icon}</span>
       <span style={{ flex: 1, fontSize: 13, color: "var(--text-2)" }}>{label}</span>
-      <span style={{ fontSize: 15, fontWeight: 700, color: value > 0 ? "var(--text)" : "var(--text-4)" }}>{value}</span>
+      <span style={{ fontSize: 15, fontWeight: 700, color: (typeof value === "number" ? value > 0 : true) ? "var(--text)" : "var(--text-4)" }}>{value}</span>
     </div>
   );
 }
