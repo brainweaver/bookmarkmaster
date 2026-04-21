@@ -64,7 +64,7 @@ export default function BookmarkCard({
   const tagSize = 8 + zoom * 1.2;
   const showUrl = zoom >= 2;
   const bodyPad = showPreview ? `${8 + zoom * 2}px` : `${8 + zoom * 3}px`;
-  const previewHeight = (82 + zoom * 34) * 2;
+  const previewHeight = (82 + zoom * 34) * 1.4;
   const initial = bookmark.title[0]?.toUpperCase() ?? "?";
 
   useEffect(() => {
