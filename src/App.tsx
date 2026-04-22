@@ -41,6 +41,8 @@ type AppGroup = {
   apps: AppShortcut[];
 };
 
+const APP_UTILITIES_GROUP = "App Utilities";
+
 function ensureUrlProtocol(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return "";
@@ -566,8 +568,73 @@ function normaliseAppShortcut(item: Record<string, unknown>, fallbackGroup = "Cu
   const iconUrl = (id === "figma" || id === "claude")
     ? undefined
     : (rawIconUrl || undefined);
-  const group = String(item.group ?? fallbackGroup).trim() || fallbackGroup;
+  const group = canonicalAppGroupName(String(item.group ?? fallbackGroup));
   return { id, name, url, icon, iconUrl, group, custom: !!item.custom };
+}
+
+function canonicalAppGroupName(raw: string): string {
+  const name = String(raw ?? "").trim() || "Custom";
+  const key = name.toLowerCase();
+  if (key === "utilities" || key === "password managers" || key === "app utilities") {
+    return APP_UTILITIES_GROUP;
+  }
+  return name;
+}
+
+function collapseDuplicateAppGroups(groups: AppGroup[]): AppGroup[] {
+  const mergedByName = new Map<string, AppGroup>();
+  const seenByName = new Map<string, Set<string>>();
+  const order: string[] = [];
+
+  for (const group of groups) {
+    const canonical = canonicalAppGroupName(group.group);
+    if (!mergedByName.has(canonical)) {
+      mergedByName.set(canonical, { group: canonical, apps: [] });
+      seenByName.set(canonical, new Set());
+      order.push(canonical);
+    }
+    const target = mergedByName.get(canonical)!;
+    const seen = seenByName.get(canonical)!;
+    for (const app of group.apps) {
+      const dedupeKey = `${app.id}|${normaliseUrlForDedupe(app.url)}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      target.apps.push({ ...app, group: canonical });
+    }
+  }
+
+  return order.map((name) => mergedByName.get(name)!);
+}
+
+function mergeCatalogWithDefaults(current: AppGroup[]): AppGroup[] {
+  const merged = collapseDuplicateAppGroups(current).map((group) => ({
+    group: group.group,
+    apps: [...group.apps],
+  }));
+
+  const groupIndexByName = new Map(merged.map((g, i) => [g.group, i] as const));
+
+  for (const defaults of FULL_APP_GROUPS) {
+    const existingIndex = groupIndexByName.get(defaults.group);
+    if (existingIndex === undefined) {
+      merged.push({ group: defaults.group, apps: [...defaults.apps] });
+      groupIndexByName.set(defaults.group, merged.length - 1);
+      continue;
+    }
+
+    const existing = merged[existingIndex];
+    const existingIds = new Set(existing.apps.map((a) => a.id));
+    const existingUrls = new Set(existing.apps.map((a) => normaliseUrlForDedupe(a.url)));
+    for (const app of defaults.apps) {
+      const urlKey = normaliseUrlForDedupe(app.url);
+      if (existingIds.has(app.id) || existingUrls.has(urlKey)) continue;
+      existing.apps.push(app);
+      existingIds.add(app.id);
+      existingUrls.add(urlKey);
+    }
+  }
+
+  return merged;
 }
 
 function loadAppCatalog(): AppGroup[] {
@@ -580,7 +647,7 @@ function loadAppCatalog(): AppGroup[] {
           .filter((g) => !!g && typeof g === "object")
           .map((g) => {
             const obj = g as Record<string, unknown>;
-            const groupName = String(obj.group ?? "Custom").trim() || "Custom";
+            const groupName = canonicalAppGroupName(String(obj.group ?? "Custom"));
             const rawApps = Array.isArray(obj.apps) ? obj.apps : [];
             const apps = rawApps
               .filter((a) => !!a && typeof a === "object")
@@ -590,7 +657,7 @@ function loadAppCatalog(): AppGroup[] {
             return { group: groupName, apps } satisfies AppGroup;
           })
           .filter((g): g is AppGroup => g !== null);
-        if (groups.length > 0) return groups;
+        if (groups.length > 0) return mergeCatalogWithDefaults(groups);
       }
     }
   } catch {}
@@ -786,6 +853,7 @@ export default function App() {
   const dataMenuRef = useRef<HTMLDivElement>(null);
   const restoreFileRef = useRef<HTMLInputElement>(null);
   const [showDeleteAll, setShowDeleteAll] = useState(false);
+  const [showClearAllTags, setShowClearAllTags] = useState(false);
   const [pendingTagDelete, setPendingTagDelete] = useState<string | null>(null);
   const [tagOrder, setTagOrder] = useState<string[]>(loadTagOrder);
   const [appCatalog, setAppCatalog] = useState<AppGroup[]>(loadAppCatalog);
@@ -1135,6 +1203,15 @@ export default function App() {
     e.dataTransfer.setData("text/plain", `${BOOKMARK_DRAG_FALLBACK_PREFIX}${bookmarkId}`);
   };
 
+  const getDraggedBookmarkId = (e: React.DragEvent): string => {
+    const directId = e.dataTransfer.getData(BOOKMARK_DRAG_MIME);
+    const plain = e.dataTransfer.getData("text/plain");
+    const fallbackId = plain.startsWith(BOOKMARK_DRAG_FALLBACK_PREFIX)
+      ? plain.slice(BOOKMARK_DRAG_FALLBACK_PREFIX.length)
+      : "";
+    return directId || fallbackId;
+  };
+
   const handleBookmarkDropOnTag = (bookmarkId: string, tag: string) => {
     replaceBookmarks(
       bookmarks.map((b) => {
@@ -1246,6 +1323,31 @@ export default function App() {
 
   const handleOpenAppShortcut = (app: AppShortcut) => {
     window.open(app.url, "_blank", "noopener,noreferrer");
+  };
+
+  const handleAddBookmarkToApps = (bookmarkId: string) => {
+    const source = bookmarks.find((b) => b.id === bookmarkId);
+    if (!source) return;
+    const sourceUrlKey = normaliseUrlForDedupe(source.url);
+    const exists = appShortcuts.some(
+      (x) => x.id === `bookmark:${source.id}` || normaliseUrlForDedupe(x.url) === sourceUrlKey
+    );
+    if (exists) {
+      setDropResult("App already exists in Apps.");
+      setTimeout(() => setDropResult(null), 1800);
+      return;
+    }
+    const app: AppShortcut = {
+      id: `bookmark:${source.id}`,
+      name: source.title?.trim() || domainFromUrl(source.url) || "Bookmark",
+      url: source.url,
+      icon: source.favicon || faviconFromUrl(source.url),
+      group: "Custom",
+      custom: true,
+    };
+    addAppShortcut(app);
+    setDropResult("Added bookmark to Apps.");
+    setTimeout(() => setDropResult(null), 1800);
   };
 
   const handleRemoveAppShortcut = (app: AppShortcut) => {
@@ -1562,18 +1664,45 @@ export default function App() {
                 + New
               </button>
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-start", gap: 10, padding: "0 10px 12px 14px" }}>
+            <div
+              style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-start", gap: 10, padding: "0 10px 12px 14px" }}
+              onDragOver={(e) => {
+                const hasAppData = e.dataTransfer.types.includes(APP_SHORTCUT_DRAG_MIME);
+                const hasBookmarkData = e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME);
+                if (!hasAppData && !hasBookmarkData) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(e) => {
+                const draggedBookmarkId = getDraggedBookmarkId(e);
+                if (draggedBookmarkId) {
+                  e.preventDefault();
+                  handleAddBookmarkToApps(draggedBookmarkId);
+                }
+              }}
+            >
               {appShortcuts.map((app) => {
                 return (
                   <div
                     key={app.id}
                     style={{ position: "relative", width: 24, height: 24 }}
                     onDragOver={(e) => {
-                      if (!e.dataTransfer.types.includes(APP_SHORTCUT_DRAG_MIME)) return;
+                      const hasAppData = e.dataTransfer.types.includes(APP_SHORTCUT_DRAG_MIME);
+                      const hasBookmarkData = e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME);
+                      if (!hasAppData && !hasBookmarkData) return;
                       e.preventDefault();
                       e.dataTransfer.dropEffect = "move";
                     }}
-                    onDrop={(e) => handleReorderAppShortcut(app.id, e)}
+                    onDrop={(e) => {
+                      const draggedBookmarkId = getDraggedBookmarkId(e);
+                      if (draggedBookmarkId) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleAddBookmarkToApps(draggedBookmarkId);
+                        return;
+                      }
+                      handleReorderAppShortcut(app.id, e);
+                    }}
                   >
                     <button
                       draggable={!appsEditMode}
@@ -1864,6 +1993,7 @@ export default function App() {
                   <DataMenuItem icon="💾" label="Backup" onClick={() => { setShowDataMenu(false); handleBackup(); }} />
                   <DataMenuItem icon="📂" label="Restore" onClick={() => { setShowDataMenu(false); restoreFileRef.current?.click(); }} />
                   <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+                  <DataMenuItem icon="🏷️" label="Clear All Tags" danger onClick={() => { setShowDataMenu(false); setShowClearAllTags(true); }} />
                   <DataMenuItem icon="🗑️" label="Delete All" danger onClick={() => { setShowDataMenu(false); setShowDeleteAll(true); }} />
                 </div>
               )}
@@ -2178,7 +2308,7 @@ export default function App() {
           </div>
         )}
 
-{showDeleteAll && (
+        {showDeleteAll && (
           <div
             onClick={() => setShowDeleteAll(false)}
             style={{
@@ -2223,6 +2353,62 @@ export default function App() {
                   }}
                 >
                   Delete all
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showClearAllTags && (
+          <div
+            onClick={() => setShowClearAllTags(false)}
+            style={{
+              position: "fixed", inset: 0, zIndex: 1200,
+              background: "rgba(0,0,0,0.55)",
+              backdropFilter: "blur(4px)", display: "flex",
+              alignItems: "center", justifyContent: "center",
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: 420, maxWidth: "calc(100vw - 32px)",
+                background: "var(--card)", border: "1px solid var(--border-hover)",
+                borderRadius: 14, padding: 20,
+                boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
+                display: "flex", flexDirection: "column", gap: 14,
+              }}
+            >
+              <h2 style={{ margin: 0, fontSize: 20, color: "var(--text)" }}>Clear all tags?</h2>
+              <p style={{ margin: 0, fontSize: 14, color: "var(--text-2)", lineHeight: 1.55 }}>
+                This will remove every tag from all bookmarks. Bookmarks will remain in your library.
+              </p>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button
+                  onClick={() => setShowClearAllTags(false)}
+                  style={{
+                    height: 34, padding: "0 14px",
+                    borderRadius: 8, border: "1px solid var(--border-hover)",
+                    background: "var(--card)", color: "var(--text-2)",
+                    cursor: "pointer", fontSize: 13, fontWeight: 600,
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    replaceBookmarks(bookmarks.map((b) => ({ ...b, tags: [] })));
+                    setSelectedTag(null);
+                    setShowClearAllTags(false);
+                  }}
+                  style={{
+                    height: 34, padding: "0 14px",
+                    borderRadius: 8, border: "1px solid #ef4444",
+                    background: "#ef4444", color: "#fff",
+                    cursor: "pointer", fontSize: 13, fontWeight: 700,
+                  }}
+                >
+                  Clear Tags
                 </button>
               </div>
             </div>

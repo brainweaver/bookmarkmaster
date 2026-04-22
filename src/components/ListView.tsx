@@ -6,10 +6,50 @@ import { previewCandidatesForLink } from "../utils/preview";
 
 const THUMB_W = [52,  92, 164, 292, 520];
 const THUMB_H = [33,  58, 104, 184, 328];
+const LIST_COL_WIDTHS_KEY = "ui_list_col_widths_v1";
+
+type ListColumnKey = "title" | "url" | "tags" | "added";
+type ListColumnWidths = Record<ListColumnKey, number>;
+
+const DEFAULT_COLUMN_WIDTHS: ListColumnWidths = {
+  title: 180,
+  url: 160,
+  tags: 180,
+  added: 80,
+};
+
+const MIN_COLUMN_WIDTHS: ListColumnWidths = {
+  title: 120,
+  url: 120,
+  tags: 120,
+  added: 72,
+};
+
+function loadColumnWidths(): ListColumnWidths {
+  try {
+    const raw = localStorage.getItem(LIST_COL_WIDTHS_KEY);
+    if (!raw) return DEFAULT_COLUMN_WIDTHS;
+    const parsed = JSON.parse(raw) as Partial<ListColumnWidths>;
+    return {
+      title: clampColumnWidth("title", Number(parsed.title ?? DEFAULT_COLUMN_WIDTHS.title)),
+      url: clampColumnWidth("url", Number(parsed.url ?? DEFAULT_COLUMN_WIDTHS.url)),
+      tags: clampColumnWidth("tags", Number(parsed.tags ?? DEFAULT_COLUMN_WIDTHS.tags)),
+      added: clampColumnWidth("added", Number(parsed.added ?? DEFAULT_COLUMN_WIDTHS.added)),
+    };
+  } catch {
+    return DEFAULT_COLUMN_WIDTHS;
+  }
+}
+
+function clampColumnWidth(key: ListColumnKey, width: number): number {
+  const safe = Number.isFinite(width) ? width : DEFAULT_COLUMN_WIDTHS[key];
+  return Math.max(MIN_COLUMN_WIDTHS[key], Math.min(560, Math.round(safe)));
+}
 
 interface RowProps {
   bookmark: Bookmark;
   zoom: number;
+  colWidths: ListColumnWidths;
   onTagClick: (tag: string) => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -19,7 +59,7 @@ interface RowProps {
   deleteConfirming: boolean;
 }
 
-function ListRow({ bookmark, zoom, onTagClick, onEdit, onDelete, onDragStartBookmark, onDropBookmarkOnBookmark, showPreview, deleteConfirming }: RowProps) {
+function ListRow({ bookmark, zoom, colWidths, onTagClick, onEdit, onDelete, onDragStartBookmark, onDropBookmarkOnBookmark, showPreview, deleteConfirming }: RowProps) {
   const [hovered, setHovered] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [previewLoaded, setPreviewLoaded] = useState(false);
@@ -168,7 +208,7 @@ function ListRow({ bookmark, zoom, onTagClick, onEdit, onDelete, onDragStartBook
           whiteSpace: "nowrap",
           overflow: "hidden",
           textOverflow: "ellipsis",
-          width: 180,
+          width: colWidths.title,
           flexShrink: 0,
         }}
       >
@@ -179,7 +219,7 @@ function ListRow({ bookmark, zoom, onTagClick, onEdit, onDelete, onDragStartBook
       <span style={{
         fontSize: 12, color: "var(--text-3)",
         whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-        width: 160, flexShrink: 0, textAlign: "left",
+        width: colWidths.url, flexShrink: 0, textAlign: "left",
       }}>
         {bookmark.url.replace(/^https?:\/\//, "").replace(/\/$/, "")}
       </span>
@@ -196,7 +236,7 @@ function ListRow({ bookmark, zoom, onTagClick, onEdit, onDelete, onDragStartBook
       {/* Tags */}
       <div style={{
         display: "flex", gap: 4, flexShrink: 0,
-        flexWrap: "nowrap", width: 180, overflow: "hidden",
+        flexWrap: "nowrap", width: colWidths.tags, overflow: "hidden",
         justifyContent: "flex-start",
       }}>
         {visibleTags(bookmark.tags).map((tag) => (
@@ -218,7 +258,7 @@ function ListRow({ bookmark, zoom, onTagClick, onEdit, onDelete, onDragStartBook
       {/* Date */}
       <span style={{
         fontSize: 11, color: "var(--text-3)",
-        whiteSpace: "nowrap", flexShrink: 0, width: 80, textAlign: "right",
+        whiteSpace: "nowrap", flexShrink: 0, width: colWidths.added, textAlign: "right",
       }}>
         {parseLocalDate(bookmark.addedAt).toLocaleDateString("en-US", {
           month: "short", day: "numeric", year: "numeric",
@@ -305,17 +345,61 @@ function formatDateLabel(dateStr: string): string {
 }
 
 export default function ListView({ bookmarks, zoom, onTagClick, onEdit, onDelete, onDragStartBookmark, onDropBookmarkOnBookmark, showPreview, deleteConfirmId, groupByDate }: Props) {
+  const [colWidths, setColWidths] = useState<ListColumnWidths>(loadColumnWidths);
+  const [resizing, setResizing] = useState<{ key: ListColumnKey; startX: number; startWidth: number } | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem(LIST_COL_WIDTHS_KEY, JSON.stringify(colWidths));
+  }, [colWidths]);
+
+  useEffect(() => {
+    if (!resizing) return;
+
+    const onMove = (e: MouseEvent) => {
+      const delta = e.clientX - resizing.startX;
+      const next = clampColumnWidth(resizing.key, resizing.startWidth + delta);
+      setColWidths((prev) => (prev[resizing.key] === next ? prev : { ...prev, [resizing.key]: next }));
+    };
+
+    const onUp = () => setResizing(null);
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    const oldCursor = document.body.style.cursor;
+    const oldUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = oldCursor;
+      document.body.style.userSelect = oldUserSelect;
+    };
+  }, [resizing]);
+
+  const startResize = (key: ListColumnKey, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setResizing({
+      key,
+      startX: e.clientX,
+      startWidth: colWidths[key],
+    });
+  };
+
   if (bookmarks.length === 0) return null;
 
   if (!groupByDate) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-        <ListHeader showPreview={showPreview} zoom={zoom} />
+        <ListHeader showPreview={showPreview} zoom={zoom} colWidths={colWidths} onResizeStart={startResize} />
         {bookmarks.map((b) => (
           <ListRow
             key={b.id}
             bookmark={b}
             zoom={zoom}
+            colWidths={colWidths}
             onTagClick={onTagClick}
             onEdit={() => onEdit(b)}
             onDelete={() => onDelete(b.id)}
@@ -342,12 +426,13 @@ export default function ListView({ bookmarks, zoom, onTagClick, onEdit, onDelete
         <section key={date}>
           <DateHeader date={date} count={groups[date].length} />
           <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            <ListHeader showPreview={showPreview} zoom={zoom} />
+            <ListHeader showPreview={showPreview} zoom={zoom} colWidths={colWidths} onResizeStart={startResize} />
             {groups[date].map((b) => (
               <ListRow
                 key={b.id}
                 bookmark={b}
                 zoom={zoom}
+                colWidths={colWidths}
                 onTagClick={onTagClick}
                 onEdit={() => onEdit(b)}
                 onDelete={() => onDelete(b.id)}
@@ -364,22 +449,71 @@ export default function ListView({ bookmarks, zoom, onTagClick, onEdit, onDelete
   );
 }
 
-function ListHeader({ showPreview, zoom }: { showPreview: boolean; zoom: number }) {
+function ListHeader({
+  showPreview,
+  zoom,
+  colWidths,
+  onResizeStart,
+}: {
+  showPreview: boolean;
+  zoom: number;
+  colWidths: ListColumnWidths;
+  onResizeStart: (key: ListColumnKey, e: React.MouseEvent) => void;
+}) {
   const zoomIndex = Math.min(THUMB_W.length - 1, Math.max(0, Math.round(zoom) - 1));
-  const cell = (label: string, style?: React.CSSProperties) => (
-    <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-4)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "left", ...style }}>
+  const cell = (
+    label: string,
+    style?: React.CSSProperties,
+    resizeKey?: ListColumnKey,
+    resizeSide: "left" | "right" = "right",
+    dividerSide?: "left" | "right"
+  ) => (
+    <span
+      style={{
+        position: "relative",
+        fontSize: 11,
+        fontWeight: 600,
+        color: "var(--text-4)",
+        textTransform: "uppercase",
+        letterSpacing: "0.05em",
+        textAlign: "left",
+        ...(dividerSide
+          ? {
+              [dividerSide === "left" ? "borderLeft" : "borderRight"]: "1px solid color-mix(in srgb, var(--border-hover) 40%, transparent)",
+              paddingLeft: dividerSide === "left" ? 10 : undefined,
+              paddingRight: dividerSide === "right" ? 10 : undefined,
+            }
+          : {}),
+        ...style,
+      }}
+    >
       {label}
+      {resizeKey && (
+        <span
+          onMouseDown={(e) => onResizeStart(resizeKey, e)}
+          title={`Resize ${label.toLowerCase()} column`}
+          style={{
+            position: "absolute",
+            top: -6,
+            [resizeSide === "right" ? "right" : "left"]: -8,
+            width: 16,
+            height: 26,
+            cursor: "col-resize",
+            background: "transparent",
+          }}
+        />
+      )}
     </span>
   );
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 12px 6px", borderBottom: "1px solid #2c2c2e", marginBottom: 2 }}>
       {showPreview && <span style={{ width: THUMB_W[zoomIndex], flexShrink: 0 }} />}
       <span style={{ width: 18, flexShrink: 0 }} />
-      {cell("Title",       { width: 180, flexShrink: 0 })}
-      {cell("URL",         { width: 160, flexShrink: 0 })}
-      {cell("Description", { flex: 1, minWidth: 0 })}
-      {cell("Tags",        { width: 180, flexShrink: 0 })}
-      {cell("Added",       { width: 80, textAlign: "right", flexShrink: 0 })}
+      {cell("Title",       { width: colWidths.title, flexShrink: 0 }, "title", "right")}
+      {cell("URL",         { width: colWidths.url, flexShrink: 0 }, "url", "right", "left")}
+      {cell("Description", { flex: 1, minWidth: 0 }, undefined, "right", "left")}
+      {cell("Tags",        { width: colWidths.tags, flexShrink: 0 }, "tags", "left", "left")}
+      {cell("Added",       { width: colWidths.added, textAlign: "right", flexShrink: 0 }, "added", "left", "left")}
       <span style={{ width: 52, flexShrink: 0 }} />
     </div>
   );

@@ -64,7 +64,9 @@ export default function BookmarkCard({
   const bodyPad = showPreview ? `${8 + zoom * 2}px` : `${8 + zoom * 3}px`;
   const previewHeight = (82 + zoom * 34) * 1.4;
   const gridCardHeight = 124 + zoom * 22;
+  const previewCardHeight = previewHeight + (120 + zoom * 18);
   const titleClampLines = showPreview ? 2 : 2;
+  const descriptionClampLines = zoom >= 4 ? 3 : 2;
   const initial = bookmark.title[0]?.toUpperCase() ?? "?";
 
   useEffect(() => {
@@ -115,7 +117,7 @@ export default function BookmarkCard({
           transition: "border-color 0.15s, box-shadow 0.15s",
           boxShadow: hovered ? "0 4px 20px rgba(0,0,0,0.4)" : "none",
           cursor: "pointer",
-          height: showPreview ? undefined : gridCardHeight,
+          height: showPreview ? previewCardHeight : gridCardHeight,
         }}
       >
         {/* Preview image */}
@@ -249,41 +251,55 @@ export default function BookmarkCard({
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 display: "-webkit-box",
-                WebkitLineClamp: zoom >= 4 ? 3 : 2,
+                WebkitLineClamp: descriptionClampLines,
                 WebkitBoxOrient: "vertical",
                 lineHeight: 1.4,
+                minHeight: `${descriptionClampLines * 1.4}em`,
               }}
             >
               {bookmark.description}
             </span>
           )}
 
-          {visibleTags(bookmark.tags).length > 0 && (
-            <div style={{ display: "flex", flexWrap: "nowrap", gap: 4, overflow: "hidden", minHeight: 22 }}>
-              {visibleTags(bookmark.tags).map((tag) => (
-                <span
-                  key={tag}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onTagClick(tag);
-                  }}
-                  style={{
-                    fontSize: tagSize,
-                    padding: `${zoom <= 2 ? 2 : 3}px ${zoom <= 2 ? 5 : 7}px`,
-                    borderRadius: 99,
-                    background: tagColor(tag) + "22",
-                    color: tagColor(tag),
-                    border: `1px solid ${tagColor(tag)}44`,
-                    cursor: "pointer",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {tag}
-                </span>
-              ))}
-            </div>
+          {showUrl && !bookmark.description && (
+            <span
+              style={{
+                fontSize: urlSize,
+                color: "var(--text-4)",
+                lineHeight: 1.4,
+                minHeight: `${descriptionClampLines * 1.4}em`,
+                opacity: 0.75,
+                display: "block",
+              }}
+            >
+              {" "}
+            </span>
           )}
+
+          <div style={{ display: "flex", flexWrap: "nowrap", gap: 4, overflow: "hidden", minHeight: 22 }}>
+            {visibleTags(bookmark.tags).map((tag) => (
+              <span
+                key={tag}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onTagClick(tag);
+                }}
+                style={{
+                  fontSize: tagSize,
+                  padding: `${zoom <= 2 ? 2 : 3}px ${zoom <= 2 ? 5 : 7}px`,
+                  borderRadius: 99,
+                  background: tagColor(tag) + "22",
+                  color: tagColor(tag),
+                  border: `1px solid ${tagColor(tag)}44`,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
         </div>
       </a>
 
