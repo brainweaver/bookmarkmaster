@@ -90,6 +90,18 @@ function preferCanonicalUrl(a: string, b: string): string {
   return a;
 }
 
+function normaliseBookmarkTitle(title: string, url: string): string {
+  const trimmed = String(title ?? "").trim();
+  if (!/^www\./i.test(trimmed)) return trimmed;
+  const withoutWww = trimmed.replace(/^www\./i, "").trim();
+  if (withoutWww) return withoutWww;
+  try {
+    return new URL(url).hostname.replace(/^www\./i, "");
+  } catch {
+    return trimmed;
+  }
+}
+
 function loadTheme(): ThemeId {
   try {
     const raw = localStorage.getItem(PREF_THEME_KEY);
@@ -265,6 +277,7 @@ export default function App() {
         !b.title.toLowerCase().includes(q) &&
         !(b.description?.toLowerCase().includes(q)) &&
         !b.url.toLowerCase().includes(q) &&
+        !(b.keywords?.some((k) => k.toLowerCase().includes(q))) &&
         !userTags.some((t) => t.includes(q))
       )) return false;
       return true;
@@ -281,6 +294,9 @@ export default function App() {
 
   // Date grouping only makes sense when sorted by date
   const effectiveGroupByDate = groupByDate && sortBy === "date";
+  const cleanupPercent = cleanupState.running && cleanupState.total > 0
+    ? Math.round((cleanupState.progress / cleanupState.total) * 100)
+    : 0;
 
   const handleSave = (data: Omit<Bookmark, "id" | "addedAt">) => {
     if (modal.mode === "add") addBookmark(data);
@@ -338,6 +354,7 @@ export default function App() {
           url,
           title: meta.title || hostname,
           description: meta.description || undefined,
+          keywords: meta.keywords ?? [],
           favicon: meta.favicon || `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`,
           tags: [],
           addedAt: localDateKey(),
@@ -396,6 +413,7 @@ export default function App() {
           url,
           title: tab.title?.trim() || hostname || url,
           description: undefined,
+          keywords: [],
           favicon: isWeb
             ? (tab.favIconUrl || `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`)
             : (tab.favIconUrl || ""),
@@ -608,14 +626,20 @@ export default function App() {
       const existingIdx = dedupeIndex.get(key);
       if (existingIdx === undefined) {
         dedupeIndex.set(key, deduped.length);
-        deduped.push({ ...b, tags: Array.from(new Set(b.tags)) });
+        deduped.push({
+          ...b,
+          title: normaliseBookmarkTitle(b.title, b.url),
+          tags: Array.from(new Set(b.tags)),
+        });
         continue;
       }
       const existing = deduped[existingIdx];
       deduped[existingIdx] = {
         ...existing,
+        title: normaliseBookmarkTitle(existing.title || b.title, preferCanonicalUrl(existing.url, b.url)),
         url: preferCanonicalUrl(existing.url, b.url),
         description: existing.description?.trim() ? existing.description : b.description,
+        keywords: Array.from(new Set([...(existing.keywords ?? []), ...(b.keywords ?? [])])),
         favicon: existing.favicon || b.favicon,
         tags: Array.from(new Set([...existing.tags, ...b.tags])),
       };
@@ -623,18 +647,19 @@ export default function App() {
     const removedCount = bookmarks.length - deduped.length;
     replaceBookmarks(deduped);
 
-    // Step 2: enrich missing descriptions and recalculate reachability.
-    const needsDesc = deduped.filter((b) => !b.description?.trim());
-    setCleanupState({ running: true, progress: 0, total: needsDesc.length + deduped.length });
+    // Step 2: enrich missing descriptions/keywords and recalculate reachability.
+    const needsMeta = deduped.filter((b) => !b.description?.trim() || !b.keywords?.length);
+    setCleanupState({ running: true, progress: 0, total: needsMeta.length + deduped.length });
 
     let enrichedCount = 0;
     let nextBookmarks = [...deduped];
-    for (let i = 0; i < needsDesc.length; i++) {
-      const bookmark = needsDesc[i];
+    for (let i = 0; i < needsMeta.length; i++) {
+      const bookmark = needsMeta[i];
       const meta = await fetchMeta(bookmark.url);
       const newDesc = meta.description?.trim() || "";
       const newFavicon = meta.favicon || "";
-      if (newDesc || newFavicon) {
+      const newKeywords = (meta.keywords ?? []).map((k) => k.trim().toLowerCase()).filter(Boolean);
+      if (newDesc || newFavicon || newKeywords.length > 0) {
         nextBookmarks = nextBookmarks.map((b) => {
           if (b.id !== bookmark.id) return b;
           const hadDescription = !!b.description?.trim();
@@ -642,6 +667,7 @@ export default function App() {
             ...b,
             ...(newDesc ? { description: newDesc } : {}),
             ...(newFavicon ? { favicon: newFavicon } : {}),
+            ...(newKeywords.length > 0 ? { keywords: Array.from(new Set(newKeywords)) } : {}),
           };
           if (!hadDescription && !!updated.description?.trim()) enrichedCount++;
           return updated;
@@ -662,14 +688,14 @@ export default function App() {
           tags: b.tags.filter((t) => t !== SYSTEM_TAG_NOT_REACHABLE),
         };
       }
-      setCleanupState((s) => ({ ...s, progress: needsDesc.length + i + 1 }));
+      setCleanupState((s) => ({ ...s, progress: needsMeta.length + i + 1 }));
     }
     const notReachableCount = nextBookmarks.filter((b) => b.tags.includes(SYSTEM_TAG_NOT_REACHABLE)).length;
     replaceBookmarks(nextBookmarks);
     setCleanupState({ running: false, progress: 0, total: 0 });
     setCleanupResult({
       removed: removedCount,
-      missingFound: needsDesc.length,
+      missingFound: needsMeta.length,
       missingFixed: enrichedCount,
       notReachable: notReachableCount,
     });
@@ -679,6 +705,11 @@ export default function App() {
     <>
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulseBlue {
+          0% { opacity: 0.35; transform: scale(0.82); }
+          60% { opacity: 1; transform: scale(1.06); }
+          100% { opacity: 0.35; transform: scale(0.82); }
+        }
         @keyframes shimmer {
           0% { background-position: 200% 0; }
           100% { background-position: -200% 0; }
@@ -908,7 +939,7 @@ export default function App() {
                 }}
               >
                 {cleanupState.running ? (
-                  <span style={{ display: "inline-block", width: 13, height: 13, border: "2px solid var(--border-hover)", borderTopColor: "#3b82f6", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+                  <CleanupProgressRing percent={cleanupPercent} />
                 ) : null}
                 My Data
                 <span style={{ fontSize: 9, opacity: 0.5, marginLeft: 1 }}>▾</span>
@@ -1320,6 +1351,43 @@ function TagChip({ label, count, active, color, onClick, vertical = false }: {
 
 function Divider() {
   return <div style={{ width: 1, height: 18, background: "var(--border)", flexShrink: 0 }} />;
+}
+
+function CleanupProgressRing({ percent }: { percent: number }) {
+  const clamped = Math.max(0, Math.min(100, percent));
+  const r = 5.5;
+  const c = 2 * Math.PI * r;
+  const offset = c - (clamped / 100) * c;
+
+  return (
+    <span title={`${clamped}%`} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, position: "relative" }}>
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+        <circle cx="7" cy="7" r={r} stroke="#3b82f644" strokeWidth="2" />
+        <circle
+          cx="7"
+          cy="7"
+          r={r}
+          stroke="#3b82f6"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeDasharray={c}
+          strokeDashoffset={offset}
+          transform="rotate(-90 7 7)"
+        />
+      </svg>
+      <span
+        style={{
+          position: "absolute",
+          width: 4,
+          height: 4,
+          borderRadius: "50%",
+          background: "#60a5fa",
+          boxShadow: "0 0 8px #3b82f6aa",
+          animation: "pulseBlue 1s ease-in-out infinite",
+        }}
+      />
+    </span>
+  );
 }
 
 function ToggleGroup({ children }: { children: React.ReactNode }) {

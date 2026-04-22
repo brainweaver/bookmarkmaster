@@ -2,7 +2,7 @@
 // Extension pages have <all_urls> host permission so cross-origin fetch works.
 export async function fetchMeta(
   url: string
-): Promise<{ title?: string; description?: string; favicon?: string }> {
+): Promise<{ title?: string; description?: string; favicon?: string; keywords?: string[] }> {
   const clean = (text?: string | null) =>
     (text ?? "")
       .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
@@ -32,6 +32,21 @@ export async function fetchMeta(
       clean(doc.querySelector('meta[name="twitter:description"]')?.getAttribute("content")) ||
       (firstParagraph.length >= 24 ? firstParagraph : "");
 
+    const rawKeywords =
+      clean(doc.querySelector('meta[name="keywords"]')?.getAttribute("content")) ||
+      clean(doc.querySelector('meta[name="news_keywords"]')?.getAttribute("content")) ||
+      clean(doc.querySelector('meta[property="article:tag"]')?.getAttribute("content")) ||
+      "";
+
+    const keywords = Array.from(
+      new Set(
+        rawKeywords
+          .split(/[;,]/)
+          .map((k) => clean(k).toLowerCase())
+          .filter(Boolean)
+      )
+    );
+
     const faviconHref =
       doc.querySelector('link[rel~="icon"]')?.getAttribute("href") ||
       "/favicon.ico";
@@ -43,7 +58,7 @@ export async function fetchMeta(
       favicon = new URL("/favicon.ico", url).href;
     }
 
-    return { title, description, favicon };
+    return { title, description, favicon, keywords };
   } catch {
     return {};
   }

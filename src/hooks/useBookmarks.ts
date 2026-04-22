@@ -32,9 +32,22 @@ function saveCustomTags(tags: string[]) {
   localStorage.setItem(CUSTOM_TAGS_KEY, JSON.stringify(tags));
 }
 
+function normaliseKeywords(keywords?: string[]): string[] | undefined {
+  if (!Array.isArray(keywords)) return undefined;
+  const cleaned = Array.from(
+    new Set(
+      keywords
+        .map((k) => String(k ?? "").trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
 function normaliseBookmarks(items: Bookmark[]): Bookmark[] {
   return items.map((b) => ({
     ...b,
+    keywords: normaliseKeywords(b.keywords),
     addedAt: clampDateKeyToToday(b.addedAt),
   }));
 }
@@ -63,6 +76,16 @@ function normaliseUrlForImportDedupe(rawUrl: string): string {
   }
 }
 
+function normaliseImportedTitle(title: string, url: string): string {
+  const trimmed = String(title ?? "").trim();
+  if (!trimmed) return title;
+  return /^www\./i.test(trimmed)
+    ? trimmed.replace(/^www\./i, "") || (() => {
+        try { return new URL(url).hostname.replace(/^www\./i, ""); } catch { return trimmed; }
+      })()
+    : trimmed;
+}
+
 export function useBookmarks() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(load);
   const [customTags, setCustomTags] = useState<string[]>(loadCustomTags);
@@ -80,7 +103,7 @@ export function useBookmarks() {
   // Runs automatically for bookmarks added on mount AND for newly imported ones.
   useEffect(() => {
     const missing = bookmarks.filter(
-      (b) => !b.description?.trim() && !enrichedIds.current.has(b.id)
+      (b) => (!b.description?.trim() || !b.keywords?.length) && !enrichedIds.current.has(b.id)
     );
     if (missing.length === 0) return;
 
@@ -91,7 +114,8 @@ export function useBookmarks() {
       for (const bookmark of missing) {
         const meta = await fetchMeta(bookmark.url);
         const nextDescription = meta.description?.trim();
-        if (!nextDescription && !meta.favicon) continue;
+        const nextKeywords = normaliseKeywords(meta.keywords);
+        if (!nextDescription && !meta.favicon && !nextKeywords?.length) continue;
 
         const current = load();
         const updated = current.map((b) =>
@@ -99,6 +123,7 @@ export function useBookmarks() {
             ? {
                 ...b,
                 description: nextDescription || b.description,
+                keywords: nextKeywords?.length ? nextKeywords : b.keywords,
                 favicon: meta.favicon || b.favicon,
               }
             : b
@@ -173,7 +198,11 @@ export function useBookmarks() {
         const key = normaliseUrlForImportDedupe(item.url);
         if (!key || existingUrls.has(key) || seen.has(key)) continue;
         seen.add(key);
-        fresh.push({ ...item, id: crypto.randomUUID() });
+        fresh.push({
+          ...item,
+          title: normaliseImportedTitle(item.title, item.url),
+          id: crypto.randomUUID(),
+        });
       }
       if (fresh.length === 0) return;
       commit([...fresh, ...current]);

@@ -35,6 +35,7 @@ export function chromeNodesToBookmarks(
       title: n.title || hostname,
       url: n.url,
       description: undefined,
+      keywords: [],
       tags: [],
       favicon: `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`,
       addedAt: n.dateAdded
@@ -80,6 +81,7 @@ export function rawToBookmarks(
       title: r.title || hostname,
       url: r.url,
       description: undefined,
+      keywords: [],
       tags: [],
       favicon: `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`,
       addedAt: today,
