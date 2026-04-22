@@ -1911,7 +1911,7 @@ export default function App() {
                 letterSpacing: "0.02em",
               }}
             >
-              v1.0.0
+              v1.0.1
             </span>
 
             <div style={{ flex: 1 }} />
@@ -1950,28 +1950,58 @@ export default function App() {
                 height: 30, boxSizing: "border-box",
               }}
             >
-              <option value="date">Date added</option>
+              <option value="date">Date Added</option>
               <option value="name">Name A–Z</option>
               <option value="ranking">Ranking</option>
             </select>
 
             <div ref={dataMenuRef} style={{ position: "relative" }}>
-              <button
-                onClick={() => setShowDataMenu((v) => !v)}
+              {cleanupState.running && (
+                <span
+                  style={{
+                    position: "absolute",
+                    left: 8,
+                    top: 0,
+                    bottom: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    zIndex: 1,
+                    pointerEvents: "none",
+                  }}
+                >
+                  <CleanupProgressRing percent={cleanupPercent} />
+                </span>
+              )}
+              <select
+                value="my-data"
+                onChange={() => {}}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  setShowDataMenu((v) => !v);
+                }}
+                onClick={(e) => e.preventDefault()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setShowDataMenu(true);
+                  }
+                  if (e.key === "Escape") {
+                    setShowDataMenu(false);
+                  }
+                }}
+                aria-label="My Data"
                 style={{
-                  display: "flex", alignItems: "center", gap: 5,
-                  padding: "0 10px", height: 30, background: "var(--card)",
-                  border: "1px solid var(--border-hover)",
-                  borderRadius: 7, color: "var(--text-2)", fontSize: 13, cursor: "pointer",
-                  boxSizing: "border-box",
+                  background: "var(--card)", border: "1px solid var(--border-hover)",
+                  borderRadius: 7,
+                  padding: cleanupState.running ? "0 24px 0 22px" : "0 24px 0 10px",
+                  color: "var(--text-2)",
+                  fontSize: 13, cursor: "pointer", outline: "none",
+                  height: 30, boxSizing: "border-box",
+                  width: cleanupState.running ? 102 : 96,
                 }}
               >
-                {cleanupState.running ? (
-                  <CleanupProgressRing percent={cleanupPercent} />
-                ) : null}
-                My Data
-                <span style={{ fontSize: 10, opacity: 0.8, marginLeft: 2 }}>▼</span>
-              </button>
+                <option value="my-data">My Data</option>
+              </select>
 
               {showDataMenu && (
                 <div style={{
@@ -1982,7 +2012,7 @@ export default function App() {
                 }}>
                   <DataMenuItem
                     icon={<img src="/broom.png" alt="" style={{ width: 17, height: 17, opacity: 0.65, filter: "var(--icon-filter)" }} />}
-                    label="Clean up"
+                    label="Clean Up"
                     disabled={cleanupState.running}
                     onClick={() => { setShowDataMenu(false); handleCleanup(); }}
                   />
@@ -2489,7 +2519,7 @@ export default function App() {
             >
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span style={{ fontSize: 22 }}><BroomIcon /></span>
-                <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", margin: 0 }}>Clean up complete</h2>
+                <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", margin: 0 }}>Clean Up complete</h2>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <ResultRow icon="🗑️" label="Duplicates Removed" value={cleanupResult.removed} />
@@ -2593,7 +2623,7 @@ function CleanupProgressRing({ percent }: { percent: number }) {
   const offset = c - (clamped / 100) * c;
 
   return (
-    <span title={`${clamped}%`} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, position: "relative" }}>
+    <span title={`${clamped}%`} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, position: "relative", lineHeight: 0 }}>
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
         <circle cx="7" cy="7" r={r} stroke="#3b82f644" strokeWidth="2" />
         <circle

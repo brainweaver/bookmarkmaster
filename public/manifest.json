@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "BookmarkMaster",
   "description": "Save and organize bookmarks with tags, search, and multiple views",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "permissions": [
     "tabs",
     "activeTab",
