@@ -60,31 +60,45 @@ function faviconFromUrl(url: string): string {
   return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
 }
 
-// Central icon registry so app icons are controlled in one place and easy to tweak.
-const APP_ICON_OVERRIDES: Record<string, string> = {
-  gmail: "gmail.svg",
-  "google-drive": "https://cdn.simpleicons.org/googledrive/4285F4",
-  "google-keep": "https://cdn.simpleicons.org/googlekeep/FFBB00",
-  "google-calendar": "https://cdn.simpleicons.org/googlecalendar/4285F4",
-  youtube: "https://cdn.simpleicons.org/youtube/FF0000",
-  github: "https://cdn.simpleicons.org/github/181717",
-  trello: "https://cdn.simpleicons.org/trello/0052CC",
-  perplexity: "https://cdn.simpleicons.org/perplexity/20B8A9",
-  claude: "https://cdn.simpleicons.org/anthropic/191919",
-  chatgpt: "https://cdn.simpleicons.org/openai/10A37F",
-  notion: "https://cdn.simpleicons.org/notion/000000",
-  linear: "https://cdn.simpleicons.org/linear/5E6AD2",
-  "stack-overflow": "https://cdn.simpleicons.org/stackoverflow/F58025",
-  "hacker-news": "https://cdn.simpleicons.org/ycombinator/F0652F",
-  whatsapp: "https://cdn.simpleicons.org/whatsapp/25D366",
-  facebook: "https://cdn.simpleicons.org/facebook/1877F2",
-  x: "https://cdn.simpleicons.org/x/000000",
-  reddit: "https://cdn.simpleicons.org/reddit/FF4500",
-};
+const LEGACY_ICON_OVERRIDE_VALUES = new Set<string>([
+  "gmail",
+  "gmail.svg",
+  "/icons/gmail.svg",
+  "https://cdn.simpleicons.org/googledrive/4285F4",
+  "https://cdn.simpleicons.org/googlekeep/FFBB00",
+  "https://cdn.simpleicons.org/googlecalendar/4285F4",
+  "https://cdn.simpleicons.org/youtube/FF0000",
+  "https://cdn.simpleicons.org/github/181717",
+  "https://cdn.simpleicons.org/trello/0052CC",
+  "https://cdn.simpleicons.org/perplexity/20B8A9",
+  "https://cdn.simpleicons.org/openai/10A37F",
+  "https://cdn.simpleicons.org/notion/000000",
+  "https://cdn.simpleicons.org/linear/5E6AD2",
+  "https://cdn.simpleicons.org/stackoverflow/F58025",
+  "https://cdn.simpleicons.org/ycombinator/F0652F",
+  "https://cdn.simpleicons.org/whatsapp/25D366",
+  "https://cdn.simpleicons.org/facebook/1877F2",
+  "https://cdn.simpleicons.org/x/000000",
+  "https://cdn.simpleicons.org/reddit/FF4500",
+]);
+
+function sanitizeLegacyIconUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  const normalized = /^(https?:)?\/\//i.test(trimmed) || trimmed.startsWith("/") || trimmed.startsWith("data:")
+    ? trimmed
+    : iconTokenToSrc(trimmed);
+  if (LEGACY_ICON_OVERRIDE_VALUES.has(trimmed) || LEGACY_ICON_OVERRIDE_VALUES.has(normalized)) {
+    return "";
+  }
+  return trimmed;
+}
 
 function presetApp(id: string, name: string, url: string, group: string, iconUrl?: string): AppShortcut {
   const normalizedUrl = ensureUrlProtocol(url);
-  const normalizedIcon = id === "figma" ? undefined : (iconUrl?.trim() || APP_ICON_OVERRIDES[id] || undefined);
+  const normalizedIcon = (id === "figma" || id === "claude")
+    ? undefined
+    : (sanitizeLegacyIconUrl(iconUrl ?? "") || undefined);
   return {
     id,
     name,
@@ -280,35 +294,33 @@ const EXTRA_APP_GROUPS: AppGroup[] = [
     ],
   },
   {
-    group: "Utilities",
+    group: "App Utilities",
     apps: [
-      presetApp("maps", "Google Maps", "https://maps.google.com", "Utilities"),
-      presetApp("translate", "Google Translate", "https://translate.google.com", "Utilities"),
-      presetApp("photos", "Google Photos", "https://photos.google.com", "Utilities"),
-      presetApp("weather", "Weather", "https://weather.com", "Utilities"),
-      presetApp("speedtest", "Speedtest", "https://speedtest.net", "Utilities"),
-      presetApp("cloud-convert", "CloudConvert", "https://cloudconvert.com", "Utilities"),
-      presetApp("wetransfer", "WeTransfer", "https://wetransfer.com", "Utilities"),
-      presetApp("calendly", "Calendly", "https://calendly.com", "Utilities"),
-      presetApp("bitly", "Bitly", "https://bitly.com", "Utilities"),
-      presetApp("tinyurl", "TinyURL", "https://tinyurl.com", "Utilities"),
-    ],
-  },
-  {
-    group: "Password Managers",
-    apps: [
-      presetApp("1password", "1Password", "https://1password.com", "Password Managers"),
-      presetApp("lastpass", "LastPass", "https://lastpass.com", "Password Managers"),
-      presetApp("bitwarden", "Bitwarden", "https://bitwarden.com", "Password Managers"),
-      presetApp("dashlane", "Dashlane", "https://dashlane.com", "Password Managers"),
-      presetApp("keeper", "Keeper", "https://keepersecurity.com", "Password Managers"),
-      presetApp("nordpass", "NordPass", "https://nordpass.com", "Password Managers"),
-      presetApp("proton-pass", "Proton Pass", "https://proton.me/pass", "Password Managers"),
-      presetApp("roboform", "RoboForm", "https://roboform.com", "Password Managers"),
-      presetApp("enpass", "Enpass", "https://enpass.io", "Password Managers"),
-      presetApp("passbolt", "Passbolt", "https://passbolt.com", "Password Managers"),
-      presetApp("keeper-commander", "Keeper Vault", "https://vault.keepersecurity.com", "Password Managers"),
-      presetApp("bitwarden-vault", "Bitwarden Vault", "https://vault.bitwarden.com", "Password Managers"),
+      presetApp("maps", "Google Maps", "https://maps.google.com", "App Utilities"),
+      presetApp("translate", "Google Translate", "https://translate.google.com", "App Utilities"),
+      presetApp("photos", "Google Photos", "https://photos.google.com", "App Utilities"),
+      presetApp("weather", "Weather", "https://weather.com", "App Utilities"),
+      presetApp("speedtest", "Speedtest", "https://speedtest.net", "App Utilities"),
+      presetApp("cloud-convert", "CloudConvert", "https://cloudconvert.com", "App Utilities"),
+      presetApp("wetransfer", "WeTransfer", "https://wetransfer.com", "App Utilities"),
+      presetApp("calendly", "Calendly", "https://calendly.com", "App Utilities"),
+      presetApp("bitly", "Bitly", "https://bitly.com", "App Utilities"),
+      presetApp("tinyurl", "TinyURL", "https://tinyurl.com", "App Utilities"),
+      presetApp("1password", "1Password", "https://1password.com", "App Utilities"),
+      presetApp("lastpass", "LastPass", "https://lastpass.com", "App Utilities"),
+      presetApp("bitwarden", "Bitwarden", "https://bitwarden.com", "App Utilities"),
+      presetApp("dashlane", "Dashlane", "https://dashlane.com", "App Utilities"),
+      presetApp("keeper", "Keeper", "https://keepersecurity.com", "App Utilities"),
+      presetApp("nordpass", "NordPass", "https://nordpass.com", "App Utilities"),
+      presetApp("proton-pass", "Proton Pass", "https://proton.me/pass", "App Utilities"),
+      presetApp("roboform", "RoboForm", "https://roboform.com", "App Utilities"),
+      presetApp("enpass", "Enpass", "https://enpass.io", "App Utilities"),
+      presetApp("passbolt", "Passbolt", "https://passbolt.com", "App Utilities"),
+      presetApp("keeper-commander", "Keeper Vault", "https://vault.keepersecurity.com", "App Utilities"),
+      presetApp("bitwarden-vault", "Bitwarden Vault", "https://vault.bitwarden.com", "App Utilities"),
+      presetApp("removebg", "remove.bg", "https://remove.bg", "App Utilities"),
+      presetApp("temp-mail", "Temp Mail", "https://temp-mail.org", "App Utilities"),
+      presetApp("generator-email", "10 Minute Mail", "https://10minutemail.com", "App Utilities"),
     ],
   },
   {
@@ -550,8 +562,10 @@ function normaliseAppShortcut(item: Record<string, unknown>, fallbackGroup = "Cu
   const name = String(item.name ?? "").trim() || domainFromUrl(url);
   const icon = String(item.icon ?? "").trim() || faviconFromUrl(url);
   const id = String(item.id ?? `${item.custom ? "custom" : "app"}:${domainFromUrl(url)}`);
-  const rawIconUrl = String(item.iconUrl ?? "").trim();
-  const iconUrl = id === "figma" ? undefined : (rawIconUrl || APP_ICON_OVERRIDES[id] || undefined);
+  const rawIconUrl = sanitizeLegacyIconUrl(String(item.iconUrl ?? ""));
+  const iconUrl = (id === "figma" || id === "claude")
+    ? undefined
+    : (rawIconUrl || undefined);
   const group = String(item.group ?? fallbackGroup).trim() || fallbackGroup;
   return { id, name, url, icon, iconUrl, group, custom: !!item.custom };
 }
