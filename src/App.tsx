@@ -20,7 +20,588 @@ const NOT_REACHABLE_FILTER = SYSTEM_TAG_NOT_REACHABLE;
 const BOOKMARK_DRAG_MIME = "application/x-bookmark-id";
 const BOOKMARK_DRAG_FALLBACK_PREFIX = "bookmark:";
 const TAG_DRAG_MIME = "application/x-sidebar-tag";
+const APP_SHORTCUT_DRAG_MIME = "application/x-app-shortcut-id";
+const APP_SHORTCUT_DRAG_FALLBACK_PREFIX = "app-shortcut:";
 const TAG_ORDER_KEY = "ui_tag_order_v1";
+const APP_SHORTCUTS_KEY = "ui_app_shortcuts_v1";
+const APP_CATALOG_KEY = "ui_app_catalog_v1";
+
+type AppShortcut = {
+  id: string;
+  name: string;
+  url: string;
+  icon: string;
+  iconUrl?: string;
+  group: string;
+  custom?: boolean;
+};
+
+type AppGroup = {
+  group: string;
+  apps: AppShortcut[];
+};
+
+function ensureUrlProtocol(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function domainFromUrl(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, "");
+  } catch {
+    return url;
+  }
+}
+
+function faviconFromUrl(url: string): string {
+  const domain = domainFromUrl(url);
+  return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
+}
+
+// Central icon registry so app icons are controlled in one place and easy to tweak.
+const APP_ICON_OVERRIDES: Record<string, string> = {
+  gmail: "gmail.svg",
+  "google-drive": "https://cdn.simpleicons.org/googledrive/4285F4",
+  "google-keep": "https://cdn.simpleicons.org/googlekeep/FFBB00",
+  "google-calendar": "https://cdn.simpleicons.org/googlecalendar/4285F4",
+  youtube: "https://cdn.simpleicons.org/youtube/FF0000",
+  github: "https://cdn.simpleicons.org/github/181717",
+  trello: "https://cdn.simpleicons.org/trello/0052CC",
+  perplexity: "https://cdn.simpleicons.org/perplexity/20B8A9",
+  claude: "https://cdn.simpleicons.org/anthropic/191919",
+  chatgpt: "https://cdn.simpleicons.org/openai/10A37F",
+  notion: "https://cdn.simpleicons.org/notion/000000",
+  linear: "https://cdn.simpleicons.org/linear/5E6AD2",
+  "stack-overflow": "https://cdn.simpleicons.org/stackoverflow/F58025",
+  "hacker-news": "https://cdn.simpleicons.org/ycombinator/F0652F",
+  whatsapp: "https://cdn.simpleicons.org/whatsapp/25D366",
+  facebook: "https://cdn.simpleicons.org/facebook/1877F2",
+  x: "https://cdn.simpleicons.org/x/000000",
+  reddit: "https://cdn.simpleicons.org/reddit/FF4500",
+};
+
+function presetApp(id: string, name: string, url: string, group: string, iconUrl?: string): AppShortcut {
+  const normalizedUrl = ensureUrlProtocol(url);
+  const normalizedIcon = id === "figma" ? undefined : (iconUrl?.trim() || APP_ICON_OVERRIDES[id] || undefined);
+  return {
+    id,
+    name,
+    url: normalizedUrl,
+    group,
+    iconUrl: normalizedIcon,
+    icon: faviconFromUrl(normalizedUrl),
+  };
+}
+
+const DEFAULT_APP_GROUPS: AppGroup[] = [
+  {
+    group: "Social & Community",
+    apps: [
+      presetApp("youtube", "YouTube", "https://youtube.com", "Social & Community"),
+      presetApp("x", "X", "https://x.com", "Social & Community"),
+      presetApp("facebook", "Facebook", "https://facebook.com", "Social & Community"),
+      presetApp("instagram", "Instagram", "https://instagram.com", "Social & Community"),
+      presetApp("linkedin", "LinkedIn", "https://linkedin.com", "Social & Community"),
+      presetApp("reddit", "Reddit", "https://reddit.com", "Social & Community"),
+      presetApp("tiktok", "TikTok", "https://tiktok.com", "Social & Community"),
+      presetApp("pinterest", "Pinterest", "https://pinterest.com", "Social & Community"),
+      presetApp("snapchat", "Snapchat", "https://snapchat.com", "Social & Community"),
+      presetApp("threads", "Threads", "https://threads.net", "Social & Community"),
+      presetApp("discord", "Discord", "https://discord.com/app", "Social & Community"),
+      presetApp("whatsapp", "WhatsApp", "https://web.whatsapp.com", "Social & Community"),
+      presetApp("telegram", "Telegram", "https://web.telegram.org", "Social & Community"),
+      presetApp("signal", "Signal", "https://signal.org", "Social & Community"),
+    ],
+  },
+  {
+    group: "Mail & Communication",
+    apps: [
+      presetApp("gmail", "Gmail", "https://mail.google.com", "Mail & Communication"),
+      presetApp("yahoo-mail", "Yahoo Mail", "https://mail.yahoo.com", "Mail & Communication"),
+      presetApp("outlook", "Outlook", "https://outlook.live.com/mail", "Mail & Communication"),
+      presetApp("proton-mail", "Proton Mail", "https://mail.proton.me", "Mail & Communication"),
+      presetApp("icloud-mail", "iCloud Mail", "https://icloud.com/mail", "Mail & Communication"),
+      presetApp("slack", "Slack", "https://app.slack.com", "Mail & Communication"),
+      presetApp("teams", "Microsoft Teams", "https://teams.microsoft.com", "Mail & Communication"),
+      presetApp("zoom", "Zoom", "https://app.zoom.us", "Mail & Communication"),
+      presetApp("google-meet", "Google Meet", "https://meet.google.com", "Mail & Communication"),
+      presetApp("skype", "Skype", "https://web.skype.com", "Mail & Communication"),
+    ],
+  },
+  {
+    group: "Productivity",
+    apps: [
+      presetApp("google-calendar", "Google Calendar", "https://calendar.google.com", "Productivity"),
+      presetApp("google-keep", "Google Keep", "https://keep.google.com", "Productivity"),
+      presetApp("google-drive", "Google Drive", "https://drive.google.com", "Productivity"),
+      presetApp("google-docs", "Google Docs", "https://docs.google.com", "Productivity"),
+      presetApp("google-sheets", "Google Sheets", "https://sheets.google.com", "Productivity"),
+      presetApp("google-slides", "Google Slides", "https://slides.google.com", "Productivity"),
+      presetApp("notion", "Notion", "https://notion.so", "Productivity"),
+      presetApp("trello", "Trello", "https://trello.com", "Productivity"),
+      presetApp("asana", "Asana", "https://app.asana.com", "Productivity"),
+      presetApp("clickup", "ClickUp", "https://app.clickup.com", "Productivity"),
+      presetApp("airtable", "Airtable", "https://airtable.com", "Productivity"),
+      presetApp("todoist", "Todoist", "https://todoist.com/app", "Productivity"),
+      presetApp("evernote", "Evernote", "https://evernote.com", "Productivity"),
+      presetApp("dropbox", "Dropbox", "https://dropbox.com", "Productivity"),
+      presetApp("box", "Box", "https://box.com", "Productivity"),
+      presetApp("onedrive", "OneDrive", "https://onedrive.live.com", "Productivity"),
+    ],
+  },
+  {
+    group: "Design & Media",
+    apps: [
+      presetApp("figma", "Figma", "https://figma.com", "Design & Media"),
+      presetApp("canva", "Canva", "https://canva.com", "Design & Media"),
+      presetApp("dribbble", "Dribbble", "https://dribbble.com", "Design & Media"),
+      presetApp("behance", "Behance", "https://behance.net", "Design & Media"),
+      presetApp("adobe-express", "Adobe Express", "https://express.adobe.com", "Design & Media"),
+      presetApp("medium", "Medium", "https://medium.com", "Design & Media"),
+      presetApp("substack", "Substack", "https://substack.com", "Design & Media"),
+      presetApp("spotify", "Spotify", "https://open.spotify.com", "Design & Media"),
+      presetApp("soundcloud", "SoundCloud", "https://soundcloud.com", "Design & Media"),
+      presetApp("netflix", "Netflix", "https://netflix.com", "Design & Media"),
+      presetApp("hulu", "Hulu", "https://hulu.com", "Design & Media"),
+      presetApp("twitch", "Twitch", "https://twitch.tv", "Design & Media"),
+    ],
+  },
+  {
+    group: "Development",
+    apps: [
+      presetApp("github", "GitHub", "https://github.com", "Development"),
+      presetApp("gitlab", "GitLab", "https://gitlab.com", "Development"),
+      presetApp("bitbucket", "Bitbucket", "https://bitbucket.org", "Development"),
+      presetApp("stack-overflow", "Stack Overflow", "https://stackoverflow.com", "Development"),
+      presetApp("mdn", "MDN", "https://developer.mozilla.org", "Development"),
+      presetApp("vercel", "Vercel", "https://vercel.com", "Development"),
+      presetApp("netlify", "Netlify", "https://app.netlify.com", "Development"),
+      presetApp("cloudflare", "Cloudflare", "https://dash.cloudflare.com", "Development"),
+      presetApp("aws", "AWS", "https://console.aws.amazon.com", "Development"),
+      presetApp("gcp", "Google Cloud", "https://console.cloud.google.com", "Development"),
+      presetApp("azure", "Azure", "https://portal.azure.com", "Development"),
+      presetApp("docker-hub", "Docker Hub", "https://hub.docker.com", "Development"),
+      presetApp("npm", "npm", "https://npmjs.com", "Development"),
+      presetApp("replit", "Replit", "https://replit.com", "Development"),
+      presetApp("codepen", "CodePen", "https://codepen.io", "Development"),
+      presetApp("visual-studio-code", "Visual Studio Code", "https://code.visualstudio.com", "Development"),
+      presetApp("linear", "Linear", "https://linear.app", "Development"),
+      presetApp("jira", "Jira", "https://atlassian.com/software/jira", "Development"),
+      presetApp("postman", "Postman", "https://web.postman.co", "Development"),
+      presetApp("sentry", "Sentry", "https://sentry.io", "Development"),
+      presetApp("grafana", "Grafana", "https://grafana.com", "Development"),
+    ],
+  },
+  {
+    group: "AI Tools",
+    apps: [
+      presetApp("chatgpt", "ChatGPT", "https://chatgpt.com", "AI Tools"),
+      presetApp("claude", "Claude", "https://claude.ai", "AI Tools"),
+      presetApp("gemini", "Gemini", "https://gemini.google.com", "AI Tools"),
+      presetApp("perplexity", "Perplexity", "https://perplexity.ai", "AI Tools"),
+      presetApp("huggingface", "Hugging Face", "https://huggingface.co", "AI Tools"),
+      presetApp("poe", "Poe", "https://poe.com", "AI Tools"),
+      presetApp("notebooklm", "NotebookLM", "https://notebooklm.google", "AI Tools"),
+      presetApp("cursor", "Cursor", "https://cursor.com", "AI Tools"),
+      presetApp("abacus-ai", "Abacus.AI", "https://abacus.ai", "AI Tools"),
+    ],
+  },
+];
+
+const EXTRA_APP_GROUPS: AppGroup[] = [
+  {
+    group: "News & Reading",
+    apps: [
+      presetApp("google-news", "Google News", "https://news.google.com", "News & Reading"),
+      presetApp("apple-news", "Apple News", "https://apple.news", "News & Reading"),
+      presetApp("flipboard", "Flipboard", "https://flipboard.com", "News & Reading"),
+      presetApp("hacker-news", "Hacker News", "https://news.ycombinator.com", "News & Reading"),
+      presetApp("feedly", "Feedly", "https://feedly.com", "News & Reading"),
+      presetApp("nytimes", "NYTimes", "https://nytimes.com", "News & Reading"),
+      presetApp("wsj", "WSJ", "https://wsj.com", "News & Reading"),
+      presetApp("bbc", "BBC", "https://bbc.com", "News & Reading"),
+      presetApp("the-guardian", "The Guardian", "https://theguardian.com", "News & Reading"),
+      presetApp("reuters", "Reuters", "https://reuters.com", "News & Reading"),
+      presetApp("bloomberg", "Bloomberg", "https://bloomberg.com", "News & Reading"),
+      presetApp("techcrunch", "TechCrunch", "https://techcrunch.com", "News & Reading"),
+    ],
+  },
+  {
+    group: "Shopping & Marketplaces",
+    apps: [
+      presetApp("amazon", "Amazon", "https://amazon.com", "Shopping & Marketplaces"),
+      presetApp("ebay", "eBay", "https://ebay.com", "Shopping & Marketplaces"),
+      presetApp("walmart", "Walmart", "https://walmart.com", "Shopping & Marketplaces"),
+      presetApp("target", "Target", "https://target.com", "Shopping & Marketplaces"),
+      presetApp("etsy", "Etsy", "https://etsy.com", "Shopping & Marketplaces"),
+      presetApp("bestbuy", "Best Buy", "https://bestbuy.com", "Shopping & Marketplaces"),
+      presetApp("aliexpress", "AliExpress", "https://aliexpress.com", "Shopping & Marketplaces"),
+      presetApp("shopify", "Shopify", "https://shopify.com", "Shopping & Marketplaces"),
+      presetApp("costco", "Costco", "https://costco.com", "Shopping & Marketplaces"),
+      presetApp("newegg", "Newegg", "https://newegg.com", "Shopping & Marketplaces"),
+      presetApp("wayfair", "Wayfair", "https://wayfair.com", "Shopping & Marketplaces"),
+      presetApp("mercari", "Mercari", "https://mercari.com", "Shopping & Marketplaces"),
+    ],
+  },
+  {
+    group: "Finance & Banking",
+    apps: [
+      presetApp("paypal", "PayPal", "https://paypal.com", "Finance & Banking"),
+      presetApp("stripe", "Stripe", "https://dashboard.stripe.com", "Finance & Banking"),
+      presetApp("wise", "Wise", "https://wise.com", "Finance & Banking"),
+      presetApp("venmo", "Venmo", "https://venmo.com", "Finance & Banking"),
+      presetApp("cashapp", "Cash App", "https://cash.app", "Finance & Banking"),
+      presetApp("robinhood", "Robinhood", "https://robinhood.com", "Finance & Banking"),
+      presetApp("coinbase", "Coinbase", "https://coinbase.com", "Finance & Banking"),
+      presetApp("binance", "Binance", "https://binance.com", "Finance & Banking"),
+      presetApp("kraken", "Kraken", "https://kraken.com", "Finance & Banking"),
+      presetApp("chase", "Chase", "https://chase.com", "Finance & Banking"),
+      presetApp("bankofamerica", "Bank of America", "https://bankofamerica.com", "Finance & Banking"),
+      presetApp("capitalone", "Capital One", "https://capitalone.com", "Finance & Banking"),
+    ],
+  },
+  {
+    group: "Learning & Docs",
+    apps: [
+      presetApp("wikipedia", "Wikipedia", "https://wikipedia.org", "Learning & Docs"),
+      presetApp("coursera", "Coursera", "https://coursera.org", "Learning & Docs"),
+      presetApp("udemy", "Udemy", "https://udemy.com", "Learning & Docs"),
+      presetApp("khan-academy", "Khan Academy", "https://khanacademy.org", "Learning & Docs"),
+      presetApp("duolingo", "Duolingo", "https://duolingo.com", "Learning & Docs"),
+      presetApp("archive", "Internet Archive", "https://archive.org", "Learning & Docs"),
+      presetApp("google-scholar", "Google Scholar", "https://scholar.google.com", "Learning & Docs"),
+      presetApp("arxiv", "arXiv", "https://arxiv.org", "Learning & Docs"),
+      presetApp("edx", "edX", "https://edx.org", "Learning & Docs"),
+      presetApp("pluralsight", "Pluralsight", "https://pluralsight.com", "Learning & Docs"),
+      presetApp("skillshare", "Skillshare", "https://skillshare.com", "Learning & Docs"),
+      presetApp("readwise", "Readwise", "https://readwise.io", "Learning & Docs"),
+    ],
+  },
+  {
+    group: "Utilities",
+    apps: [
+      presetApp("maps", "Google Maps", "https://maps.google.com", "Utilities"),
+      presetApp("translate", "Google Translate", "https://translate.google.com", "Utilities"),
+      presetApp("photos", "Google Photos", "https://photos.google.com", "Utilities"),
+      presetApp("weather", "Weather", "https://weather.com", "Utilities"),
+      presetApp("speedtest", "Speedtest", "https://speedtest.net", "Utilities"),
+      presetApp("cloud-convert", "CloudConvert", "https://cloudconvert.com", "Utilities"),
+      presetApp("wetransfer", "WeTransfer", "https://wetransfer.com", "Utilities"),
+      presetApp("calendly", "Calendly", "https://calendly.com", "Utilities"),
+      presetApp("bitly", "Bitly", "https://bitly.com", "Utilities"),
+      presetApp("tinyurl", "TinyURL", "https://tinyurl.com", "Utilities"),
+    ],
+  },
+  {
+    group: "Password Managers",
+    apps: [
+      presetApp("1password", "1Password", "https://1password.com", "Password Managers"),
+      presetApp("lastpass", "LastPass", "https://lastpass.com", "Password Managers"),
+      presetApp("bitwarden", "Bitwarden", "https://bitwarden.com", "Password Managers"),
+      presetApp("dashlane", "Dashlane", "https://dashlane.com", "Password Managers"),
+      presetApp("keeper", "Keeper", "https://keepersecurity.com", "Password Managers"),
+      presetApp("nordpass", "NordPass", "https://nordpass.com", "Password Managers"),
+      presetApp("proton-pass", "Proton Pass", "https://proton.me/pass", "Password Managers"),
+      presetApp("roboform", "RoboForm", "https://roboform.com", "Password Managers"),
+      presetApp("enpass", "Enpass", "https://enpass.io", "Password Managers"),
+      presetApp("passbolt", "Passbolt", "https://passbolt.com", "Password Managers"),
+      presetApp("keeper-commander", "Keeper Vault", "https://vault.keepersecurity.com", "Password Managers"),
+      presetApp("bitwarden-vault", "Bitwarden Vault", "https://vault.bitwarden.com", "Password Managers"),
+    ],
+  },
+  {
+    group: "CRM & Sales",
+    apps: [
+      presetApp("salesforce", "Salesforce", "https://salesforce.com", "CRM & Sales"),
+      presetApp("hubspot", "HubSpot", "https://hubspot.com", "CRM & Sales"),
+      presetApp("pipedrive", "Pipedrive", "https://pipedrive.com", "CRM & Sales"),
+      presetApp("zoho-crm", "Zoho CRM", "https://zoho.com/crm", "CRM & Sales"),
+      presetApp("freshsales", "Freshsales", "https://freshworks.com/crm", "CRM & Sales"),
+      presetApp("intercom", "Intercom", "https://intercom.com", "CRM & Sales"),
+      presetApp("zendesk", "Zendesk", "https://zendesk.com", "CRM & Sales"),
+      presetApp("gong", "Gong", "https://gong.io", "CRM & Sales"),
+    ],
+  },
+  {
+    group: "Marketing",
+    apps: [
+      presetApp("mailchimp", "Mailchimp", "https://mailchimp.com", "Marketing"),
+      presetApp("convertkit", "ConvertKit", "https://convertkit.com", "Marketing"),
+      presetApp("activecampaign", "ActiveCampaign", "https://activecampaign.com", "Marketing"),
+      presetApp("klaviyo", "Klaviyo", "https://klaviyo.com", "Marketing"),
+      presetApp("semrush", "Semrush", "https://semrush.com", "Marketing"),
+      presetApp("ahrefs", "Ahrefs", "https://ahrefs.com", "Marketing"),
+      presetApp("google-analytics", "Google Analytics", "https://analytics.google.com", "Marketing"),
+      presetApp("google-ads", "Google Ads", "https://ads.google.com", "Marketing"),
+      presetApp("meta-ads", "Meta Ads", "https://business.facebook.com", "Marketing"),
+      presetApp("buffer", "Buffer", "https://buffer.com", "Marketing"),
+      presetApp("hootsuite", "Hootsuite", "https://hootsuite.com", "Marketing"),
+      presetApp("sprout-social", "Sprout Social", "https://sproutsocial.com", "Marketing"),
+    ],
+  },
+  {
+    group: "Data & BI",
+    apps: [
+      presetApp("tableau", "Tableau", "https://tableau.com", "Data & BI"),
+      presetApp("power-bi", "Power BI", "https://powerbi.microsoft.com", "Data & BI"),
+      presetApp("looker", "Looker", "https://looker.com", "Data & BI"),
+      presetApp("metabase", "Metabase", "https://metabase.com", "Data & BI"),
+      presetApp("mode", "Mode", "https://mode.com", "Data & BI"),
+      presetApp("amplitude", "Amplitude", "https://amplitude.com", "Data & BI"),
+      presetApp("mixpanel", "Mixpanel", "https://mixpanel.com", "Data & BI"),
+      presetApp("segment", "Segment", "https://segment.com", "Data & BI"),
+    ],
+  },
+  {
+    group: "Cloud & DevOps",
+    apps: [
+      presetApp("kubernetes", "Kubernetes", "https://kubernetes.io", "Cloud & DevOps"),
+      presetApp("digitalocean", "DigitalOcean", "https://digitalocean.com", "Cloud & DevOps"),
+      presetApp("linode", "Linode", "https://linode.com", "Cloud & DevOps"),
+      presetApp("render", "Render", "https://render.com", "Cloud & DevOps"),
+      presetApp("railway", "Railway", "https://railway.app", "Cloud & DevOps"),
+      presetApp("flyio", "Fly.io", "https://fly.io", "Cloud & DevOps"),
+      presetApp("heroku", "Heroku", "https://heroku.com", "Cloud & DevOps"),
+      presetApp("supabase", "Supabase", "https://supabase.com", "Cloud & DevOps"),
+      presetApp("firebase", "Firebase", "https://firebase.google.com", "Cloud & DevOps"),
+      presetApp("planet-scale", "PlanetScale", "https://planetscale.com", "Cloud & DevOps"),
+      presetApp("mongodb-atlas", "MongoDB Atlas", "https://mongodb.com/atlas", "Cloud & DevOps"),
+      presetApp("datadog", "Datadog", "https://datadoghq.com", "Cloud & DevOps"),
+    ],
+  },
+  {
+    group: "Code Hosting & CI",
+    apps: [
+      presetApp("github-actions", "GitHub Actions", "https://github.com/features/actions", "Code Hosting & CI"),
+      presetApp("circleci", "CircleCI", "https://circleci.com", "Code Hosting & CI"),
+      presetApp("travis", "Travis CI", "https://travis-ci.com", "Code Hosting & CI"),
+      presetApp("jenkins", "Jenkins", "https://jenkins.io", "Code Hosting & CI"),
+      presetApp("teamcity", "TeamCity", "https://jetbrains.com/teamcity", "Code Hosting & CI"),
+      presetApp("buildkite", "Buildkite", "https://buildkite.com", "Code Hosting & CI"),
+      presetApp("sonarqube", "SonarQube", "https://sonarqube.org", "Code Hosting & CI"),
+      presetApp("codecov", "Codecov", "https://about.codecov.io", "Code Hosting & CI"),
+    ],
+  },
+  {
+    group: "Design & Product",
+    apps: [
+      presetApp("miro", "Miro", "https://miro.com", "Design & Product"),
+      presetApp("whimsical", "Whimsical", "https://whimsical.com", "Design & Product"),
+      presetApp("framer", "Framer", "https://framer.com", "Design & Product"),
+      presetApp("invision", "InVision", "https://invisionapp.com", "Design & Product"),
+      presetApp("zeplin", "Zeplin", "https://zeplin.io", "Design & Product"),
+      presetApp("loom", "Loom", "https://loom.com", "Design & Product"),
+      presetApp("mural", "Mural", "https://mural.co", "Design & Product"),
+      presetApp("coda", "Coda", "https://coda.io", "Design & Product"),
+    ],
+  },
+  {
+    group: "Video & Streaming",
+    apps: [
+      presetApp("disney-plus", "Disney+", "https://disneyplus.com", "Video & Streaming"),
+      presetApp("prime-video", "Prime Video", "https://primevideo.com", "Video & Streaming"),
+      presetApp("max", "Max", "https://max.com", "Video & Streaming"),
+      presetApp("peacock", "Peacock", "https://peacocktv.com", "Video & Streaming"),
+      presetApp("paramount-plus", "Paramount+", "https://paramountplus.com", "Video & Streaming"),
+      presetApp("apple-tv", "Apple TV+", "https://tv.apple.com", "Video & Streaming"),
+      presetApp("vimeo", "Vimeo", "https://vimeo.com", "Video & Streaming"),
+      presetApp("dailymotion", "Dailymotion", "https://dailymotion.com", "Video & Streaming"),
+    ],
+  },
+  {
+    group: "Music & Audio",
+    apps: [
+      presetApp("apple-music", "Apple Music", "https://music.apple.com", "Music & Audio"),
+      presetApp("youtube-music", "YouTube Music", "https://music.youtube.com", "Music & Audio"),
+      presetApp("pandora", "Pandora", "https://pandora.com", "Music & Audio"),
+      presetApp("deezer", "Deezer", "https://deezer.com", "Music & Audio"),
+      presetApp("tidal", "Tidal", "https://tidal.com", "Music & Audio"),
+      presetApp("audible", "Audible", "https://audible.com", "Music & Audio"),
+      presetApp("pocket-casts", "Pocket Casts", "https://pocketcasts.com", "Music & Audio"),
+      presetApp("overcast", "Overcast", "https://overcast.fm", "Music & Audio"),
+    ],
+  },
+  {
+    group: "Travel & Local",
+    apps: [
+      presetApp("airbnb", "Airbnb", "https://airbnb.com", "Travel & Local"),
+      presetApp("booking", "Booking.com", "https://booking.com", "Travel & Local"),
+      presetApp("expedia", "Expedia", "https://expedia.com", "Travel & Local"),
+      presetApp("tripadvisor", "Tripadvisor", "https://tripadvisor.com", "Travel & Local"),
+      presetApp("uber", "Uber", "https://uber.com", "Travel & Local"),
+      presetApp("lyft", "Lyft", "https://lyft.com", "Travel & Local"),
+      presetApp("kayak", "Kayak", "https://kayak.com", "Travel & Local"),
+      presetApp("skyscanner", "Skyscanner", "https://skyscanner.com", "Travel & Local"),
+    ],
+  },
+  {
+    group: "Food & Delivery",
+    apps: [
+      presetApp("doordash", "DoorDash", "https://doordash.com", "Food & Delivery"),
+      presetApp("ubereats", "Uber Eats", "https://ubereats.com", "Food & Delivery"),
+      presetApp("grubhub", "Grubhub", "https://grubhub.com", "Food & Delivery"),
+      presetApp("instacart", "Instacart", "https://instacart.com", "Food & Delivery"),
+      presetApp("opentable", "OpenTable", "https://opentable.com", "Food & Delivery"),
+      presetApp("yelp", "Yelp", "https://yelp.com", "Food & Delivery"),
+      presetApp("starbucks", "Starbucks", "https://starbucks.com", "Food & Delivery"),
+      presetApp("mcdonalds", "McDonald's", "https://mcdonalds.com", "Food & Delivery"),
+    ],
+  },
+  {
+    group: "Health & Fitness",
+    apps: [
+      presetApp("fitbit", "Fitbit", "https://fitbit.com", "Health & Fitness"),
+      presetApp("myfitnesspal", "MyFitnessPal", "https://myfitnesspal.com", "Health & Fitness"),
+      presetApp("strava", "Strava", "https://strava.com", "Health & Fitness"),
+      presetApp("peloton", "Peloton", "https://onepeloton.com", "Health & Fitness"),
+      presetApp("headspace", "Headspace", "https://headspace.com", "Health & Fitness"),
+      presetApp("calm", "Calm", "https://calm.com", "Health & Fitness"),
+      presetApp("goodrx", "GoodRx", "https://goodrx.com", "Health & Fitness"),
+      presetApp("zocdoc", "Zocdoc", "https://zocdoc.com", "Health & Fitness"),
+    ],
+  },
+  {
+    group: "Home & Smart",
+    apps: [
+      presetApp("google-home", "Google Home", "https://home.google.com", "Home & Smart"),
+      presetApp("alexa", "Alexa", "https://alexa.amazon.com", "Home & Smart"),
+      presetApp("philips-hue", "Philips Hue", "https://meethue.com", "Home & Smart"),
+      presetApp("nest", "Nest", "https://store.google.com/category/nest", "Home & Smart"),
+      presetApp("ring", "Ring", "https://ring.com", "Home & Smart"),
+      presetApp("wyze", "Wyze", "https://wyze.com", "Home & Smart"),
+      presetApp("ecobee", "ecobee", "https://ecobee.com", "Home & Smart"),
+      presetApp("smartthings", "SmartThings", "https://smartthings.com", "Home & Smart"),
+    ],
+  },
+  {
+    group: "Gaming",
+    apps: [
+      presetApp("steam", "Steam", "https://store.steampowered.com", "Gaming"),
+      presetApp("epic-games", "Epic Games", "https://store.epicgames.com", "Gaming"),
+      presetApp("xbox", "Xbox", "https://xbox.com", "Gaming"),
+      presetApp("playstation", "PlayStation", "https://playstation.com", "Gaming"),
+      presetApp("nintendo", "Nintendo", "https://nintendo.com", "Gaming"),
+      presetApp("battle-net", "Battle.net", "https://battle.net", "Gaming"),
+      presetApp("ea", "EA", "https://ea.com", "Gaming"),
+      presetApp("riot-games", "Riot Games", "https://riotgames.com", "Gaming"),
+    ],
+  },
+];
+
+const FULL_APP_GROUPS: AppGroup[] = [...DEFAULT_APP_GROUPS, ...EXTRA_APP_GROUPS];
+
+const PRESET_APP_MAP = new Map(FULL_APP_GROUPS.flatMap((g) => g.apps.map((a) => [a.id, a] as const)));
+const DEFAULT_APP_SHORTCUT_IDS = [
+  "gmail",
+  "google-drive",
+  "google-calendar",
+  "google-keep",
+  "youtube",
+  "whatsapp",
+  "x",
+  "facebook",
+  "notion",
+  "trello",
+  "figma",
+  "github",
+  "linear",
+  "chatgpt",
+  "claude",
+  "perplexity",
+] as const;
+
+function iconTokenToSrc(token: string): string {
+  const trimmed = token.trim();
+  if (!trimmed) return "";
+  if (/^(https?:)?\/\//i.test(trimmed) || trimmed.startsWith("/") || trimmed.startsWith("data:")) {
+    return trimmed;
+  }
+  const filename = /\.[a-z0-9]+$/i.test(trimmed) ? trimmed : `${trimmed}.png`;
+  return `/icons/${filename}`;
+}
+
+function localAppIconCandidates(url: string): string[] {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    if (!host) return [];
+    const parts = host.split(".").filter(Boolean);
+    const base = parts.length >= 2 ? parts.slice(-2).join(".") : host;
+    const names = host === base ? [host] : [host, base];
+    const exts = ["svg", "png", "webp", "jpg", "jpeg"];
+    return names.flatMap((name) => exts.map((ext) => `/icons/apps/${name}.${ext}`));
+  } catch {
+    return [];
+  }
+}
+
+function appIconCandidates(app: Pick<AppShortcut, "url" | "icon" | "iconUrl">): string[] {
+  const local = localAppIconCandidates(app.url);
+  const token = app.iconUrl?.trim();
+  const tokenSrc = token ? iconTokenToSrc(token) : "";
+  const candidates = [...local, tokenSrc, app.icon || "", faviconFromUrl(app.url)];
+  return Array.from(new Set(candidates.filter(Boolean)));
+}
+
+function normaliseAppShortcut(item: Record<string, unknown>, fallbackGroup = "Custom"): AppShortcut | null {
+  const url = ensureUrlProtocol(String(item.url ?? ""));
+  if (!url) return null;
+  const name = String(item.name ?? "").trim() || domainFromUrl(url);
+  const icon = String(item.icon ?? "").trim() || faviconFromUrl(url);
+  const id = String(item.id ?? `${item.custom ? "custom" : "app"}:${domainFromUrl(url)}`);
+  const rawIconUrl = String(item.iconUrl ?? "").trim();
+  const iconUrl = id === "figma" ? undefined : (rawIconUrl || APP_ICON_OVERRIDES[id] || undefined);
+  const group = String(item.group ?? fallbackGroup).trim() || fallbackGroup;
+  return { id, name, url, icon, iconUrl, group, custom: !!item.custom };
+}
+
+function loadAppCatalog(): AppGroup[] {
+  try {
+    const raw = localStorage.getItem(APP_CATALOG_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const groups = parsed
+          .filter((g) => !!g && typeof g === "object")
+          .map((g) => {
+            const obj = g as Record<string, unknown>;
+            const groupName = String(obj.group ?? "Custom").trim() || "Custom";
+            const rawApps = Array.isArray(obj.apps) ? obj.apps : [];
+            const apps = rawApps
+              .filter((a) => !!a && typeof a === "object")
+              .map((a) => normaliseAppShortcut(a as Record<string, unknown>, groupName))
+              .filter((a): a is AppShortcut => a !== null);
+            if (apps.length === 0) return null;
+            return { group: groupName, apps } satisfies AppGroup;
+          })
+          .filter((g): g is AppGroup => g !== null);
+        if (groups.length > 0) return groups;
+      }
+    }
+  } catch {}
+  return FULL_APP_GROUPS;
+}
+
+function loadAppShortcuts(): AppShortcut[] {
+  try {
+    const raw = localStorage.getItem(APP_SHORTCUTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const cleaned = parsed
+          .filter((item) => !!item && typeof item === "object")
+          .map((item) => normaliseAppShortcut(item as Record<string, unknown>, "Custom"))
+          .filter((item): item is AppShortcut => item !== null);
+        if (cleaned.length > 0) return cleaned;
+      }
+    }
+  } catch {}
+
+  return DEFAULT_APP_SHORTCUT_IDS
+    .map((id) => PRESET_APP_MAP.get(id))
+    .filter((item): item is AppShortcut => !!item);
+}
 
 type DisplayMode = "list" | "grid" | "preview";
 type ModalState =
@@ -37,6 +618,8 @@ type BackupPreferences = {
   zoom?: number;
   tagOrder?: string[];
   sidebarOpen?: boolean;
+  appShortcuts?: AppShortcut[];
+  appCatalog?: AppGroup[];
 };
 
 type BackupPayloadV2 = {
@@ -191,6 +774,18 @@ export default function App() {
   const [showDeleteAll, setShowDeleteAll] = useState(false);
   const [pendingTagDelete, setPendingTagDelete] = useState<string | null>(null);
   const [tagOrder, setTagOrder] = useState<string[]>(loadTagOrder);
+  const [appCatalog, setAppCatalog] = useState<AppGroup[]>(loadAppCatalog);
+  const [appShortcuts, setAppShortcuts] = useState<AppShortcut[]>(loadAppShortcuts);
+  const [showAppPicker, setShowAppPicker] = useState(false);
+  const [customAppName, setCustomAppName] = useState("");
+  const [customAppUrl, setCustomAppUrl] = useState("");
+  const [customAppIconUrl, setCustomAppIconUrl] = useState("");
+  const [addingCustomApp, setAddingCustomApp] = useState(false);
+  const [appsEditMode, setAppsEditMode] = useState(false);
+  const [appDraggingId, setAppDraggingId] = useState<string | null>(null);
+  const [appDragReadyId, setAppDragReadyId] = useState<string | null>(null);
+  const appDragHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [appPickerError, setAppPickerError] = useState<string | null>(null);
 
   // When opened via extension toolbar click or context menu, URL params carry
   // the originating tab's info — auto-open the add modal with it prefilled.
@@ -232,6 +827,23 @@ export default function App() {
   }, [showDataMenu]);
 
   useEffect(() => {
+    return () => {
+      if (appDragHoverTimerRef.current) {
+        clearTimeout(appDragHoverTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!appsEditMode) return;
+    if (appDragHoverTimerRef.current) {
+      clearTimeout(appDragHoverTimerRef.current);
+      appDragHoverTimerRef.current = null;
+    }
+    setAppDragReadyId(null);
+  }, [appsEditMode]);
+
+  useEffect(() => {
     localStorage.setItem(PREF_THEME_KEY, theme);
   }, [theme]);
 
@@ -254,6 +866,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(TAG_ORDER_KEY, JSON.stringify(tagOrder));
   }, [tagOrder]);
+
+  useEffect(() => {
+    localStorage.setItem(APP_SHORTCUTS_KEY, JSON.stringify(appShortcuts));
+  }, [appShortcuts]);
+
+  useEffect(() => {
+    localStorage.setItem(APP_CATALOG_KEY, JSON.stringify(appCatalog));
+  }, [appCatalog]);
 
   useEffect(() => {
     setTagOrder((prev) => {
@@ -545,6 +1165,136 @@ export default function App() {
     setTagOrder(next);
   };
 
+  const addAppShortcut = (app: AppShortcut) => {
+    setAppShortcuts((prev) => {
+      const appKey = normaliseUrlForDedupe(app.url);
+      if (prev.some((x) => x.id === app.id || normaliseUrlForDedupe(x.url) === appKey)) return prev;
+      return [...prev, app];
+    });
+  };
+
+  const handlePresetAppAdd = (app: AppShortcut) => {
+    addAppShortcut(app);
+    setShowAppPicker(false);
+    setCustomAppName("");
+    setCustomAppUrl("");
+    setCustomAppIconUrl("");
+    setAppPickerError(null);
+  };
+
+  const handleCustomAppAdd = async () => {
+    if (addingCustomApp) return;
+    const normalizedUrl = ensureUrlProtocol(customAppUrl);
+    if (!normalizedUrl) {
+      setAppPickerError("Please enter a URL.");
+      return;
+    }
+
+    let url = "";
+    try {
+      url = new URL(normalizedUrl).toString();
+    } catch {
+      setAppPickerError("Please enter a valid URL.");
+      return;
+    }
+
+    setAddingCustomApp(true);
+    setAppPickerError(null);
+    try {
+      const meta = await fetchMeta(url);
+      const domain = domainFromUrl(url);
+      const defaultName = domain || "Custom app";
+      const trimmedIconUrl = customAppIconUrl.trim();
+      const app: AppShortcut = {
+        id: `custom:${domain || Date.now().toString(36)}:${Date.now().toString(36)}`,
+        name: customAppName.trim() || meta.title?.trim() || defaultName,
+        url,
+        iconUrl: trimmedIconUrl || undefined,
+        icon: meta.favicon || faviconFromUrl(url),
+        group: "Custom",
+        custom: true,
+      };
+      addAppShortcut(app);
+      setShowAppPicker(false);
+      setCustomAppName("");
+      setCustomAppUrl("");
+      setCustomAppIconUrl("");
+    } catch {
+      setAppPickerError("Could not fetch this URL. Please try another one.");
+    } finally {
+      setAddingCustomApp(false);
+    }
+  };
+
+  const handleOpenAppShortcut = (app: AppShortcut) => {
+    window.open(app.url, "_blank", "noopener,noreferrer");
+  };
+
+  const handleRemoveAppShortcut = (app: AppShortcut) => {
+    const ok = window.confirm(`Remove ${app.name} from Apps?`);
+    if (!ok) return;
+    setAppShortcuts((prev) => prev.filter((x) => x.id !== app.id));
+  };
+
+  const getDraggedAppId = (e: React.DragEvent): string => {
+    const directId = e.dataTransfer.getData(APP_SHORTCUT_DRAG_MIME);
+    const plain = e.dataTransfer.getData("text/plain");
+    const fallbackId = plain.startsWith(APP_SHORTCUT_DRAG_FALLBACK_PREFIX)
+      ? plain.slice(APP_SHORTCUT_DRAG_FALLBACK_PREFIX.length)
+      : "";
+    return directId || fallbackId;
+  };
+
+  const handleAppShortcutDragStart = (appId: string, e: React.DragEvent) => {
+    if (appsEditMode) return;
+    if (appDragHoverTimerRef.current) {
+      clearTimeout(appDragHoverTimerRef.current);
+      appDragHoverTimerRef.current = null;
+    }
+    setAppDragReadyId(null);
+    setAppDraggingId(appId);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData(APP_SHORTCUT_DRAG_MIME, appId);
+    e.dataTransfer.setData("text/plain", `${APP_SHORTCUT_DRAG_FALLBACK_PREFIX}${appId}`);
+  };
+
+  const handleReorderAppShortcut = (targetId: string, e: React.DragEvent) => {
+    e.preventDefault();
+    const draggedId = getDraggedAppId(e);
+    setAppDraggingId(null);
+    if (!draggedId || draggedId === targetId) return;
+
+    setAppShortcuts((prev) => {
+      const from = prev.findIndex((x) => x.id === draggedId);
+      const to = prev.findIndex((x) => x.id === targetId);
+      if (from < 0 || to < 0 || from === to) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  };
+
+  const handleAppShortcutMouseEnter = (appId: string) => {
+    if (appsEditMode) return;
+    if (appDragHoverTimerRef.current) {
+      clearTimeout(appDragHoverTimerRef.current);
+    }
+    setAppDragReadyId(null);
+    appDragHoverTimerRef.current = setTimeout(() => {
+      setAppDragReadyId(appId);
+      appDragHoverTimerRef.current = null;
+    }, 2000);
+  };
+
+  const handleAppShortcutMouseLeave = (appId: string) => {
+    if (appDragHoverTimerRef.current) {
+      clearTimeout(appDragHoverTimerRef.current);
+      appDragHoverTimerRef.current = null;
+    }
+    setAppDragReadyId((prev) => (prev === appId ? null : prev));
+  };
+
   const handleBackup = () => {
     const payload: BackupPayloadV2 = {
       version: 2,
@@ -558,6 +1308,8 @@ export default function App() {
         zoom,
         tagOrder,
         sidebarOpen,
+        appShortcuts,
+        appCatalog,
       },
     };
     const data = JSON.stringify(payload, null, 2);
@@ -607,6 +1359,30 @@ export default function App() {
           if (typeof prefs.zoom === "number" && Number.isFinite(prefs.zoom)) setZoom(Math.max(1, Math.min(5, prefs.zoom)));
           if (Array.isArray(prefs.tagOrder)) setTagOrder(prefs.tagOrder.filter((t): t is string => typeof t === "string"));
           if (typeof prefs.sidebarOpen === "boolean") setSidebarOpen(prefs.sidebarOpen);
+          if (Array.isArray(prefs.appShortcuts)) {
+            const restoredApps = prefs.appShortcuts
+              .filter((item) => !!item && typeof item === "object")
+              .map((item) => normaliseAppShortcut(item as Record<string, unknown>, "Custom"))
+              .filter((item): item is AppShortcut => item !== null);
+            setAppShortcuts(restoredApps);
+          }
+          if (Array.isArray(prefs.appCatalog)) {
+            const restoredCatalog = prefs.appCatalog
+              .filter((g) => !!g && typeof g === "object")
+              .map((g) => {
+                const obj = g as Record<string, unknown>;
+                const groupName = String(obj.group ?? "Custom").trim() || "Custom";
+                const rawApps = Array.isArray(obj.apps) ? obj.apps : [];
+                const apps = rawApps
+                  .filter((a) => !!a && typeof a === "object")
+                  .map((a) => normaliseAppShortcut(a as Record<string, unknown>, groupName))
+                  .filter((a): a is AppShortcut => a !== null);
+                if (apps.length === 0) return null;
+                return { group: groupName, apps } satisfies AppGroup;
+              })
+              .filter((g): g is AppGroup => g !== null);
+            setAppCatalog(restoredCatalog);
+          }
         }
       } catch {
         alert("Could not read backup file — make sure it's a valid bookmarks backup JSON.");
@@ -741,6 +1517,98 @@ export default function App() {
             width: 196, display: "flex", flexDirection: "column",
             padding: "20px 0", minHeight: "100%",
           }}>
+            <div style={{ padding: "0 8px 6px 16px", display: "flex", alignItems: "center" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", letterSpacing: "0.07em", textTransform: "uppercase", flex: 1 }}>
+                Apps
+              </span>
+              <button
+                onClick={() => setAppsEditMode((v) => !v)}
+                title="Toggle app remove mode"
+                style={{
+                  background: appsEditMode ? "var(--border)" : "none", border: "1px solid var(--border-hover)", borderRadius: 5,
+                  color: "var(--text-3)", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                  padding: "2px 6px", lineHeight: 1.4, marginRight: 4,
+                }}
+              >
+                {appsEditMode ? "Done" : "Edit"}
+              </button>
+              <button
+                onClick={() => { setShowAppPicker(true); setAppPickerError(null); }}
+                title="Add app shortcut"
+                style={{
+                  background: "none", border: "1px solid var(--border-hover)", borderRadius: 5,
+                  color: "var(--text-3)", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                  padding: "2px 7px", lineHeight: 1.4,
+                }}
+              >
+                + New
+              </button>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-start", gap: 10, padding: "0 10px 12px 14px" }}>
+              {appShortcuts.map((app) => {
+                return (
+                  <div
+                    key={app.id}
+                    style={{ position: "relative", width: 24, height: 24 }}
+                    onDragOver={(e) => {
+                      if (!e.dataTransfer.types.includes(APP_SHORTCUT_DRAG_MIME)) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                    }}
+                    onDrop={(e) => handleReorderAppShortcut(app.id, e)}
+                  >
+                    <button
+                      draggable={!appsEditMode}
+                      onDragStart={(e) => handleAppShortcutDragStart(app.id, e)}
+                      onDragEnd={() => {
+                        setAppDraggingId(null);
+                        setAppDragReadyId(null);
+                      }}
+                      onMouseEnter={() => handleAppShortcutMouseEnter(app.id)}
+                      onMouseLeave={() => handleAppShortcutMouseLeave(app.id)}
+                      title={`${app.name} — ${app.url}`}
+                      onClick={() => { if (!appsEditMode) handleOpenAppShortcut(app); }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        handleRemoveAppShortcut(app);
+                      }}
+                      style={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: 6,
+                        border: "1px solid var(--border)",
+                        background: "var(--card)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: appsEditMode ? "default" : (appDragReadyId === app.id ? "grab" : "default"),
+                        padding: 0,
+                        opacity: appDraggingId === app.id ? 0.6 : 1,
+                      }}
+                    >
+                      <AppIcon app={app} width={24} height={24} radius={4} />
+                    </button>
+                    {appsEditMode && (
+                      <button
+                        title={`Remove ${app.name}`}
+                        onClick={() => handleRemoveAppShortcut(app)}
+                        style={{
+                          position: "absolute", top: -7, right: -7,
+                          width: 14, height: 14, borderRadius: 99,
+                          border: "1px solid #ef4444", background: "#ef4444",
+                          color: "#fff", fontSize: 10, lineHeight: "10px",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          cursor: "pointer", padding: 0,
+                        }}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
             <div style={{ padding: "0 8px 14px 16px", display: "flex", alignItems: "center" }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", letterSpacing: "0.07em", textTransform: "uppercase", flex: 1 }}>
                 Tags
@@ -885,6 +1753,19 @@ export default function App() {
               onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
               onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
             >BookmarkMaster.com</a>
+            <span
+              style={{
+                marginLeft: 2,
+                alignSelf: "flex-end",
+                marginBottom: 1,
+                color: "var(--text-4)",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.02em",
+              }}
+            >
+              v1.0.0
+            </span>
 
             <div style={{ flex: 1 }} />
 
@@ -1155,7 +2036,131 @@ export default function App() {
           />
         )}
 
-        {showDeleteAll && (
+                        {showAppPicker && (
+          <div
+            onClick={() => {
+              setShowAppPicker(false);
+              setAppPickerError(null);
+            }}
+            style={{
+              position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)",
+              backdropFilter: "blur(4px)", display: "flex",
+              alignItems: "center", justifyContent: "center", zIndex: 1000,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "var(--card)", border: "1px solid var(--border-hover)",
+                borderRadius: 14, padding: 22, width: 700, maxWidth: "calc(100vw - 32px)",
+                maxHeight: "calc(100vh - 72px)", overflow: "auto",
+                display: "flex", flexDirection: "column", gap: 14,
+                boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", margin: 0 }}>Add App Shortcut</h2>
+                <button
+                  onClick={() => setShowAppPicker(false)}
+                  style={{
+                    width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border-hover)",
+                    background: "var(--card)", color: "var(--text-3)", cursor: "pointer",
+                    fontSize: 15,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                <span style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>
+                  Custom (Paste URL)
+                </span>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <input
+                    type="text"
+                    value={customAppName}
+                    onChange={(e) => setCustomAppName(e.target.value)}
+                    placeholder="Name (optional)"
+                    style={{
+                      flex: "1 1 180px", minWidth: 180, background: "var(--bg)", border: "1px solid var(--border-hover)",
+                      borderRadius: 7, padding: "8px 10px", color: "var(--text)", fontSize: 13, outline: "none",
+                    }}
+                  />
+                  <input
+                    type="text"
+                    value={customAppUrl}
+                    onChange={(e) => setCustomAppUrl(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") void handleCustomAppAdd(); }}
+                    placeholder="https://example.com"
+                    style={{
+                      flex: "2 1 260px", minWidth: 240, background: "var(--bg)", border: "1px solid var(--border-hover)",
+                      borderRadius: 7, padding: "8px 10px", color: "var(--text)", fontSize: 13, outline: "none",
+                    }}
+                  />
+                  <input
+                    type="text"
+                    value={customAppIconUrl}
+                    onChange={(e) => setCustomAppIconUrl(e.target.value)}
+                    placeholder="Icon URL or local icon name (optional)"
+                    style={{
+                      flex: "2 1 260px", minWidth: 240, background: "var(--bg)", border: "1px solid var(--border-hover)",
+                      borderRadius: 7, padding: "8px 10px", color: "var(--text)", fontSize: 13, outline: "none",
+                    }}
+                  />
+                  <button
+                    onClick={() => { void handleCustomAppAdd(); }}
+                    disabled={addingCustomApp}
+                    style={{
+                      background: "#3b82f6", border: "none", borderRadius: 7, color: "#fff",
+                      fontSize: 13, fontWeight: 700, padding: "0 12px", height: 34,
+                      cursor: addingCustomApp ? "not-allowed" : "pointer", opacity: addingCustomApp ? 0.6 : 1,
+                    }}
+                  >
+                    {addingCustomApp ? "Adding…" : "Add Custom"}
+                  </button>
+                </div>
+                {appPickerError && (
+                  <span style={{ fontSize: 12, color: "#ef4444" }}>{appPickerError}</span>
+                )}
+              </div>
+
+              {appCatalog.map((group) => (
+                <div key={group.group} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <span style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>
+                    {group.group}
+                  </span>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 }}>
+                    {group.apps.map((app) => {
+                      const alreadyAdded = appShortcuts.some((x) => x.id === app.id || normaliseUrlForDedupe(x.url) === normaliseUrlForDedupe(app.url));
+                      return (
+                        <button
+                          key={app.id}
+                          onClick={() => handlePresetAppAdd(app)}
+                          disabled={alreadyAdded}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 8, height: 34,
+                            padding: "0 10px", borderRadius: 8,
+                            border: `1px solid ${alreadyAdded ? "var(--border)" : "var(--border-hover)"}`,
+                            background: alreadyAdded ? "var(--border)" : "var(--card)",
+                            color: alreadyAdded ? "var(--text-4)" : "var(--text-2)",
+                            cursor: alreadyAdded ? "not-allowed" : "pointer",
+                            fontSize: 12, fontWeight: 600, textAlign: "left",
+                          }}
+                        >
+                          <AppIcon app={app} width={16} height={15} radius={3} />
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{app.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+{showDeleteAll && (
           <div
             onClick={() => setShowDeleteAll(false)}
             style={{
@@ -1346,6 +2351,30 @@ function TagChip({ label, count, active, color, onClick, vertical = false }: {
       <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
       <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-4)", flexShrink: 0 }}>{count}</span>
     </button>
+  );
+}
+
+function AppIcon({ app, width, height, radius }: { app: Pick<AppShortcut, "url" | "icon" | "iconUrl">; width: number; height: number; radius: number }) {
+  const sources = useMemo(() => appIconCandidates(app), [app.url, app.icon, app.iconUrl]);
+  const [idx, setIdx] = useState(0);
+
+  useEffect(() => {
+    setIdx(0);
+  }, [sources.join("|")]);
+
+  const src = sources[Math.min(idx, Math.max(0, sources.length - 1))] || faviconFromUrl(app.url);
+
+  return (
+    <img
+      src={src}
+      alt=""
+      width={width}
+      height={height}
+      style={{ width, height, objectFit: "contain", borderRadius: radius, background: "#fff", flexShrink: 0 }}
+      onError={() => {
+        setIdx((i) => Math.min(i + 1, sources.length - 1));
+      }}
+    />
   );
 }
 
