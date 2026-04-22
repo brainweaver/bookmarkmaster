@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Bookmark } from "../data/mockBookmarks";
 import { visibleTags } from "../constants/tags";
+import { previewCandidatesForLink } from "../utils/preview";
 
 export const TAG_COLORS: Record<string, string> = {
   dev: "#3b82f6",
@@ -21,14 +22,6 @@ export const TAG_COLORS: Record<string, string> = {
 
 export function tagColor(tag: string) {
   return TAG_COLORS[tag] ?? "#6b7280";
-}
-
-function previewUrl(url: string) {
-  return `/api/screenshot?url=${encodeURIComponent(url)}`;
-}
-
-function fallbackPreviewUrl(url: string) {
-  return `https://s.wordpress.com/mshots/v1/${encodeURIComponent(url)}?w=900`;
 }
 
 interface Props {
@@ -57,9 +50,11 @@ export default function BookmarkCard({
   const [faviconError, setFaviconError] = useState(false);
   const [previewError, setPreviewError] = useState(false);
   const [previewLoaded, setPreviewLoaded] = useState(false);
-  const [previewSrc, setPreviewSrc] = useState(() => previewUrl(bookmark.url));
+  const [previewIndex, setPreviewIndex] = useState(0);
   const [hovered, setHovered] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const previewSources = previewCandidatesForLink(bookmark.url);
+  const previewSrc = previewSources[Math.min(previewIndex, Math.max(0, previewSources.length - 1))] || "";
 
   const faviconSize = 14 + zoom * 4;
   const titleSize = 11 + zoom * 2;
@@ -75,7 +70,7 @@ export default function BookmarkCard({
   useEffect(() => {
     setPreviewError(false);
     setPreviewLoaded(false);
-    setPreviewSrc(previewUrl(bookmark.url));
+    setPreviewIndex(0);
   }, [bookmark.url]);
 
   return (
@@ -151,9 +146,9 @@ export default function BookmarkCard({
               alt=""
               onLoad={() => setPreviewLoaded(true)}
               onError={() => {
-                if (previewSrc !== fallbackPreviewUrl(bookmark.url)) {
+                if (previewIndex < previewSources.length - 1) {
                   setPreviewLoaded(false);
-                  setPreviewSrc(fallbackPreviewUrl(bookmark.url));
+                  setPreviewIndex((i) => i + 1);
                   return;
                 }
                 setPreviewError(true);

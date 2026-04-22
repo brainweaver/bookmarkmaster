@@ -977,6 +977,10 @@ export default function App() {
       raw.split(/[\n\r]+/).map((s) => s.trim()).filter((s) => s.startsWith("http") && !s.startsWith("#"))
     ));
     if (urls.length === 0) return;
+    const droppedTags =
+      selectedTag && selectedTag !== NOT_TAGGED_FILTER && selectedTag !== NOT_REACHABLE_FILTER
+        ? [selectedTag]
+        : [];
 
     setDropLoading(true);
     try {
@@ -990,7 +994,7 @@ export default function App() {
           description: meta.description || undefined,
           keywords: meta.keywords ?? [],
           favicon: meta.favicon || `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`,
-          tags: [],
+          tags: droppedTags,
           addedAt: localDateKey(),
         };
       }));

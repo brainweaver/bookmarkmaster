@@ -86,6 +86,27 @@ function normaliseImportedTitle(title: string, url: string): string {
     : trimmed;
 }
 
+function isYoutubeUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === "youtube.com" || host.endsWith(".youtube.com") || host === "youtu.be" || host.endsWith(".youtu.be");
+  } catch {
+    return false;
+  }
+}
+
+function isGenericYoutubeTitle(title?: string): boolean {
+  const t = String(title ?? "").trim();
+  if (!t) return true;
+  return /^-?\s*youtube$/i.test(t) || /\s-\s*YouTube$/i.test(t);
+}
+
+function isGenericYoutubeDescription(description?: string): boolean {
+  const d = String(description ?? "").trim().toLowerCase();
+  if (!d) return true;
+  return d.includes("enjoy the videos and music you love");
+}
+
 export function useBookmarks() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(load);
   const [customTags, setCustomTags] = useState<string[]>(loadCustomTags);
@@ -103,7 +124,13 @@ export function useBookmarks() {
   // Runs automatically for bookmarks added on mount AND for newly imported ones.
   useEffect(() => {
     const missing = bookmarks.filter(
-      (b) => (!b.description?.trim() || !b.keywords?.length) && !enrichedIds.current.has(b.id)
+      (b) =>
+        (
+          !b.description?.trim() ||
+          !b.keywords?.length ||
+          (isYoutubeUrl(b.url) && (isGenericYoutubeTitle(b.title) || isGenericYoutubeDescription(b.description)))
+        ) &&
+        !enrichedIds.current.has(b.id)
     );
     if (missing.length === 0) return;
 
@@ -113,15 +140,20 @@ export function useBookmarks() {
     (async () => {
       for (const bookmark of missing) {
         const meta = await fetchMeta(bookmark.url);
+        const shouldRefreshYoutube = isYoutubeUrl(bookmark.url) && (
+          isGenericYoutubeTitle(bookmark.title) || isGenericYoutubeDescription(bookmark.description)
+        );
+        const nextTitle = meta.title?.trim();
         const nextDescription = meta.description?.trim();
         const nextKeywords = normaliseKeywords(meta.keywords);
-        if (!nextDescription && !meta.favicon && !nextKeywords?.length) continue;
+        if (!nextTitle && !nextDescription && !meta.favicon && !nextKeywords?.length) continue;
 
         const current = load();
         const updated = current.map((b) =>
           b.id === bookmark.id
             ? {
                 ...b,
+                title: shouldRefreshYoutube && nextTitle ? nextTitle : b.title,
                 description: nextDescription || b.description,
                 keywords: nextKeywords?.length ? nextKeywords : b.keywords,
                 favicon: meta.favicon || b.favicon,

@@ -1,3 +1,5 @@
+import { getYoutubeVideoId } from "./preview";
+
 // Fetches page metadata (title, description, favicon) directly from a URL.
 // Extension pages have <all_urls> host permission so cross-origin fetch works.
 export async function fetchMeta(
@@ -8,6 +10,50 @@ export async function fetchMeta(
       .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
       .replace(/\s+/g, " ")
       .trim();
+
+  // YouTube pages often return generic metadata when fetched without cookies.
+  // Prefer oEmbed for stable, video-specific title/channel info.
+  const youtubeId = getYoutubeVideoId(url);
+  if (youtubeId) {
+    const canonical = `https://www.youtube.com/watch?v=${youtubeId}`;
+    const endpoints = [
+      `https://www.youtube.com/oembed?url=${encodeURIComponent(canonical)}&format=json`,
+      `https://noembed.com/embed?url=${encodeURIComponent(canonical)}`,
+    ];
+    for (const endpoint of endpoints) {
+      try {
+        const res = await fetch(endpoint, {
+          signal: AbortSignal.timeout(8000),
+          credentials: "omit",
+        });
+        if (!res.ok) continue;
+        const data = await res.json() as {
+          title?: string;
+          author_name?: string;
+          provider_name?: string;
+        };
+        const title = clean(data.title);
+        const author = clean(data.author_name);
+        const provider = clean(data.provider_name) || "YouTube";
+        const description =
+          author && title
+            ? `${provider} video by ${author}`
+            : author
+              ? `${provider} video by ${author}`
+              : `${provider} video`;
+        if (title) {
+          return {
+            title,
+            description,
+            favicon: "https://www.youtube.com/favicon.ico",
+            keywords: ["youtube", "video"],
+          };
+        }
+      } catch {
+        // Fall through to normal metadata scraping
+      }
+    }
+  }
 
   try {
     const res = await fetch(url, {

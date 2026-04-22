@@ -1,11 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Bookmark } from "../data/mockBookmarks";
 import { tagColor } from "./BookmarkCard";
 import { visibleTags } from "../constants/tags";
-
-function previewUrl(url: string) {
-  return `/api/screenshot?url=${encodeURIComponent(url)}`;
-}
+import { previewCandidatesForLink } from "../utils/preview";
 
 const THUMB_W = [52,  92, 164, 292, 520];
 const THUMB_H = [33,  58, 104, 184, 328];
@@ -27,9 +24,18 @@ function ListRow({ bookmark, zoom, onTagClick, onEdit, onDelete, onDragStartBook
   const [dragOver, setDragOver] = useState(false);
   const [previewLoaded, setPreviewLoaded] = useState(false);
   const [previewError, setPreviewError] = useState(false);
+  const [previewIndex, setPreviewIndex] = useState(0);
   const [faviconError, setFaviconError] = useState(false);
   const initial = bookmark.title[0]?.toUpperCase() ?? "?";
   const zoomIndex = Math.min(THUMB_W.length - 1, Math.max(0, Math.round(zoom) - 1));
+  const previewSources = previewCandidatesForLink(bookmark.url);
+  const previewSrc = previewSources[Math.min(previewIndex, Math.max(0, previewSources.length - 1))] || "";
+
+  useEffect(() => {
+    setPreviewLoaded(false);
+    setPreviewError(false);
+    setPreviewIndex(0);
+  }, [bookmark.url]);
 
   return (
     <div
@@ -94,10 +100,17 @@ function ListRow({ bookmark, zoom, onTagClick, onEdit, onDelete, onDragStartBook
           />
           {/* image absolutely positioned — never affects row layout */}
           <img
-            src={previewUrl(bookmark.url)}
+            src={previewSrc}
             alt=""
             onLoad={() => setPreviewLoaded(true)}
-            onError={() => setPreviewError(true)}
+            onError={() => {
+              if (previewIndex < previewSources.length - 1) {
+                setPreviewLoaded(false);
+                setPreviewIndex((i) => i + 1);
+                return;
+              }
+              setPreviewError(true);
+            }}
             style={{
               position: "absolute",
               top: 0, left: 0,
