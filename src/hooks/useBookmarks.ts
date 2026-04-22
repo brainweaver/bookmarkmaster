@@ -203,6 +203,17 @@ export function useBookmarks() {
           tags: b.tags.map((t) => (t === oldName ? trimmed : t)),
         }))
       );
+      setCustomTags((prev) => {
+        if (!prev.includes(oldName)) return prev;
+        if (prev.includes(trimmed)) {
+          const deduped = prev.filter((t) => t !== oldName);
+          saveCustomTags(deduped);
+          return deduped;
+        }
+        const next = prev.map((t) => (t === oldName ? trimmed : t)).sort();
+        saveCustomTags(next);
+        return next;
+      });
     },
     [bookmarks, commit]
   );

@@ -33,18 +33,85 @@ const TAG_FALLBACK_PALETTE = [
   "#14b8a6", // teal
 ];
 
-function colorForUnknownTag(tag: string): string {
-  const key = tag.trim().toLowerCase();
-  let hash = 0;
-  for (let i = 0; i < key.length; i++) {
-    hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
+const TAG_DYNAMIC_COLOR_MAP_KEY = "ui_tag_dynamic_colors_v1";
+const TAG_LAST_ASSIGNED_COLOR_KEY = "ui_tag_last_assigned_color_v1";
+
+let dynamicTagColorMap: Record<string, string> | null = null;
+let lastAssignedDynamicColor: string | null = null;
+
+function loadDynamicTagColorMap(): Record<string, string> {
+  if (dynamicTagColorMap) return dynamicTagColorMap;
+  try {
+    const raw = localStorage.getItem(TAG_DYNAMIC_COLOR_MAP_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      dynamicTagColorMap = Object.fromEntries(
+        Object.entries(parsed).filter(
+          ([k, v]) => typeof k === "string" && typeof v === "string" && TAG_FALLBACK_PALETTE.includes(v)
+        )
+      ) as Record<string, string>;
+    } else {
+      dynamicTagColorMap = {};
+    }
+  } catch {
+    dynamicTagColorMap = {};
   }
-  const idx = Math.abs(hash) % TAG_FALLBACK_PALETTE.length;
-  return TAG_FALLBACK_PALETTE[idx];
+
+  try {
+    const last = localStorage.getItem(TAG_LAST_ASSIGNED_COLOR_KEY);
+    lastAssignedDynamicColor = last && TAG_FALLBACK_PALETTE.includes(last) ? last : null;
+  } catch {
+    lastAssignedDynamicColor = null;
+  }
+
+  return dynamicTagColorMap ?? {};
+}
+
+function saveDynamicTagColorMap(map: Record<string, string>, last: string) {
+  try {
+    localStorage.setItem(TAG_DYNAMIC_COLOR_MAP_KEY, JSON.stringify(map));
+    localStorage.setItem(TAG_LAST_ASSIGNED_COLOR_KEY, last);
+  } catch {
+    // best-effort persistence only
+  }
+}
+
+function randomFrom(colors: string[]): string {
+  if (colors.length === 0) return TAG_FALLBACK_PALETTE[0];
+  const idx = Math.floor(Math.random() * colors.length);
+  return colors[idx];
+}
+
+function assignDynamicTagColor(tag: string): string {
+  const key = tag.trim().toLowerCase();
+  if (!key) return TAG_FALLBACK_PALETTE[0];
+
+  const map = loadDynamicTagColorMap();
+  const existing = map[key];
+  if (existing) return existing;
+
+  const used = new Set(Object.values(map));
+  const unused = TAG_FALLBACK_PALETTE.filter((c) => !used.has(c));
+  const avoidLast = (colors: string[]) =>
+    lastAssignedDynamicColor ? colors.filter((c) => c !== lastAssignedDynamicColor) : colors;
+
+  const pool =
+    avoidLast(unused).length > 0
+      ? avoidLast(unused)
+      : avoidLast(TAG_FALLBACK_PALETTE).length > 0
+      ? avoidLast(TAG_FALLBACK_PALETTE)
+      : TAG_FALLBACK_PALETTE;
+
+  const chosen = randomFrom(pool);
+  map[key] = chosen;
+  dynamicTagColorMap = map;
+  lastAssignedDynamicColor = chosen;
+  saveDynamicTagColorMap(map, chosen);
+  return chosen;
 }
 
 export function tagColor(tag: string) {
-  return TAG_COLORS[tag] ?? colorForUnknownTag(tag);
+  return TAG_COLORS[tag] ?? assignDynamicTagColor(tag);
 }
 
 interface Props {
