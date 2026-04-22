@@ -1910,10 +1910,28 @@ export default function App() {
               <IconExpandTabs />
             </button>
             <a href="https://www.bookmarkmaster.com" target="_blank" rel="noreferrer"
-              style={{ fontSize: 15, fontWeight: 700, marginRight: 4, color: "var(--text)", textDecoration: "none" }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 15,
+                fontWeight: 700,
+                marginRight: 4,
+                color: "var(--text)",
+                textDecoration: "none",
+              }}
               onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
               onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
-            >BookmarkMaster.com</a>
+            >
+              <img
+                src="/favicon.png"
+                alt="BookMarkMaster icon"
+                width={16}
+                height={16}
+                style={{ borderRadius: 4, flexShrink: 0 }}
+              />
+              <span>BookmarkMaster.com</span>
+            </a>
             <span
               style={{
                 marginLeft: 2,
@@ -1925,7 +1943,7 @@ export default function App() {
                 letterSpacing: "0.02em",
               }}
             >
-              v1.0.1
+              v1.0.2
             </span>
 
             <div style={{ flex: 1 }} />
