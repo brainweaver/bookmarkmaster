@@ -1,9 +1,11 @@
 // Chrome MV3 service worker — handles toolbar click and context menu
 
 chrome.runtime.onInstalled.addListener(() => {
+  const menuLabel =
+    chrome.i18n?.getMessage("contextSaveToBookmarkMaster") || "Save to BookmarkMaster";
   chrome.contextMenus.create({
     id: "save-bookmark",
-    title: "Save to BookmarkMaster",
+    title: menuLabel,
     contexts: ["page", "link"],
   });
 });

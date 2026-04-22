@@ -1,6 +1,6 @@
 # BookmarkMaster
 
-BookmarkMaster is a Chrome Extension + React app for saving, organizing, and cleaning up bookmarks.
+BookmarkMaster is a browser extension + React app for saving, organizing, and cleaning up bookmarks.
 
 ## Local Development
 
@@ -16,7 +16,7 @@ npm install
 npm run dev
 ```
 
-## Build Extension
+## Build Extension (Base)
 
 Build the extension bundle into `dist/`:
 
@@ -48,14 +48,54 @@ npm run build
 
 - `public/manifest.json` is copied into `dist/manifest.json` during build.
 - For extension testing, always load/reload the `dist` directory, not `src`.
+- Browser-specific manifests live in `manifests/`.
 
-## Create Tester Zip
+## Tester Packages
 
-Build and package a shareable zip for local testers:
+Use browser-specific tester packages only:
 
 ```bash
-npm run package:testers
+npm run package:browsers
 ```
 
-This creates `BookmarkMaster-extension.zip` at the project root.
-Testers can extract it and load the `dist` folder via `chrome://extensions` → **Load unpacked**.
+This creates zip files in `browser-packages/` (one per browser target).
+
+## Build For Multiple Browsers
+
+Build browser-specific extension folders:
+
+```bash
+npm run build:browsers
+```
+
+Outputs:
+
+- `dist-browsers/chrome`
+- `dist-browsers/edge`
+- `dist-browsers/opera`
+- `dist-browsers/firefox`
+- `dist-browsers/safari`
+
+Package all browser builds as zips:
+
+```bash
+npm run package:browsers
+```
+
+Outputs:
+
+- `browser-packages/BookmarkMaster-chrome.zip`
+- `browser-packages/BookmarkMaster-edge.zip`
+- `browser-packages/BookmarkMaster-opera.zip`
+- `browser-packages/BookmarkMaster-firefox.zip`
+- `browser-packages/BookmarkMaster-safari.zip`
+
+## Safari Note
+
+Safari distribution normally uses Apple’s conversion/signing flow:
+
+```bash
+xcrun safari-web-extension-converter /Users/abdul/Src/BookmarkMaster/dist-browsers/safari --project-location /Users/abdul/Src/BookmarkMaster/safari
+```
+
+Then open the generated Xcode project to sign and run/publish.

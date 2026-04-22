@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "BookmarkMaster"
+  },
+  "extDescription": {
+    "message": "Guarda y organiza marcadores con etiquetas, búsqueda y múltiples vistas"
+  },
+  "actionTitle": {
+    "message": "BookmarkMaster"
+  },
+  "contextSaveToBookmarkMaster": {
+    "message": "Guardar en BookmarkMaster"
+  }
+}

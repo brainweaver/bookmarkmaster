@@ -4,12 +4,13 @@ import TimelineView from "./components/TimelineView";
 import ListView from "./components/ListView";
 import BookmarkModal from "./components/BookmarkModal";
 import ImportExportModal from "./components/ImportExportModal";
-import { tagColor } from "./components/BookmarkCard";
+import { cycleTagColor, tagColor } from "./components/BookmarkCard";
 import { useBookmarks } from "./hooks/useBookmarks";
 import { fetchMeta, isReachable } from "./utils/fetchMeta";
 import { localDateKey } from "./utils/date";
 import { SYSTEM_TAG_NOT_REACHABLE, visibleTags } from "./constants/tags";
 import type { Bookmark } from "./data/mockBookmarks";
+import { t } from "./i18n";
 
 function gridColumnsFromZoom(zoom: number): number {
   const normalized = (Math.max(1, Math.min(5, zoom)) - 1) / 4;
@@ -826,7 +827,7 @@ function loadTagOrder(): string[] {
 }
 
 export default function App() {
-  const { bookmarks, customTags, addBookmark, updateBookmark, removeBookmark, importBookmarks, renameTag, deleteTag, addTag, replaceBookmarks, replaceCustomTags, allTags } = useBookmarks();
+  const { bookmarks, customTags, addBookmark, updateBookmark, removeBookmark, importBookmarks, renameTag, deleteTag, clearTag, addTag, replaceBookmarks, replaceCustomTags, allTags } = useBookmarks();
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
 
@@ -855,6 +856,7 @@ export default function App() {
   const [showDeleteAll, setShowDeleteAll] = useState(false);
   const [showClearAllTags, setShowClearAllTags] = useState(false);
   const [pendingTagDelete, setPendingTagDelete] = useState<string | null>(null);
+  const [, setTagColorVersion] = useState(0);
   const [tagOrder, setTagOrder] = useState<string[]>(loadTagOrder);
   const [appCatalog, setAppCatalog] = useState<AppGroup[]>(loadAppCatalog);
   const [appShortcuts, setAppShortcuts] = useState<AppShortcut[]>(loadAppShortcuts);
@@ -1757,19 +1759,19 @@ export default function App() {
             </div>
 
             <div style={{ padding: "0 8px 14px 16px", display: "flex", alignItems: "center" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", letterSpacing: "0.07em", textTransform: "uppercase", flex: 1 }}>
-                Tags
+                <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", letterSpacing: "0.07em", textTransform: "uppercase", flex: 1 }}>
+                {t("tags")}
               </span>
               <button
                 onClick={() => { setNewTagInput(""); setTimeout(() => newTagRef.current?.focus(), 50); }}
-                title="Create new tag"
+                title={t("createNewTag")}
                 style={{
                   background: "none", border: "1px solid var(--border-hover)", borderRadius: 5,
                   color: "var(--text-3)", fontSize: 11, fontWeight: 600, cursor: "pointer",
                   padding: "2px 7px", lineHeight: 1.4,
                 }}
               >
-                + New
+                {t("newShort")}
               </button>
             </div>
             {newTagInput !== null && (
@@ -1778,7 +1780,7 @@ export default function App() {
                   ref={newTagRef}
                   type="text"
                   value={newTagInput}
-                  placeholder="tag-name"
+                  placeholder={t("tagNamePlaceholder")}
                   onChange={(e) => setNewTagInput(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
@@ -1795,16 +1797,16 @@ export default function App() {
                 />
               </div>
             )}
-            <TagChip label="All" count={bookmarks.length} active={selectedTag === null} onClick={() => setSelectedTag(null)} vertical />
+            <TagChip label={t("all")} count={bookmarks.length} active={selectedTag === null} onClick={() => setSelectedTag(null)} vertical />
             <TagChip
-              label="Not Tagged"
+              label={t("notTagged")}
               count={bookmarks.filter((b) => visibleTags(b.tags).length === 0).length}
               active={selectedTag === NOT_TAGGED_FILTER}
               onClick={() => setSelectedTag(selectedTag === NOT_TAGGED_FILTER ? null : NOT_TAGGED_FILTER)}
               vertical
             />
             <TagChip
-              label="Not Reachable"
+              label={t("notReachable")}
               count={bookmarks.filter((b) => b.tags.includes(SYSTEM_TAG_NOT_REACHABLE)).length}
               active={selectedTag === NOT_REACHABLE_FILTER}
               onClick={() => setSelectedTag(selectedTag === NOT_REACHABLE_FILTER ? null : NOT_REACHABLE_FILTER)}
@@ -1822,6 +1824,11 @@ export default function App() {
                   onSelect={() => setSelectedTag(selectedTag === tag ? null : tag)}
                   onRename={(newName) => renameTag(tag, newName)}
                   onDelete={() => setPendingTagDelete(tag)}
+                  onClear={() => clearTag(tag)}
+                  onChangeColor={() => {
+                    cycleTagColor(tag);
+                    setTagColorVersion((v) => v + 1);
+                  }}
                   onBookmarkDrop={(bookmarkId) => handleBookmarkDropOnTag(bookmarkId, tag)}
                   onTagReorder={handleReorderSidebarTag}
                 />
@@ -1857,7 +1864,7 @@ export default function App() {
             </button>
             <button
               onClick={() => setTheme((t) => nextTheme(t))}
-              title={`Switch color theme (${theme})`}
+              title={t("themeSwitchTooltip", { theme })}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
                 width: 28, height: 28, borderRadius: 7, border: "none",
@@ -1869,7 +1876,7 @@ export default function App() {
             </button>
             <button
               onClick={handleCollapseTabs}
-              title="Collapse tabs to bookmarks"
+              title={t("collapseTabsTooltip")}
               disabled={collapseTabsLoading}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
@@ -1883,7 +1890,7 @@ export default function App() {
             </button>
             <button
               onClick={handleExpandTabs}
-              title="Expand selected tag links"
+              title={t("expandSelectedTooltip")}
               disabled={expandTabsLoading || !selectedTag}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
@@ -1916,7 +1923,7 @@ export default function App() {
 
             <div style={{ flex: 1 }} />
 
-            <input type="text" placeholder="Search… or #tag" value={search}
+            <input type="text" placeholder={t("searchPlaceholder")} value={search}
               onChange={(e) => setSearch(e.target.value)}
               style={{ background: "var(--card)", border: "1px solid var(--border-hover)", borderRadius: 7, padding: "6px 12px", color: "var(--text)", fontSize: 13, outline: "none", width: 220 }}
             />
@@ -1929,20 +1936,20 @@ export default function App() {
 
             {/* View mode */}
             <ToggleGroup>
-              <ToggleBtn active={displayMode === "grid"} onClick={() => setDisplayMode("grid")} title="Tile view" icon={<IconTile />} />
-              <ToggleBtn active={displayMode === "list"} onClick={() => setDisplayMode("list")} title="Table view" icon={<IconTable />} />
-              <ToggleBtn active={displayMode === "preview"} onClick={() => setDisplayMode("preview")} title="Preview view" icon={<IconPreview />} />
+              <ToggleBtn active={displayMode === "grid"} onClick={() => setDisplayMode("grid")} title={t("tileView")} icon={<IconTile />} />
+              <ToggleBtn active={displayMode === "list"} onClick={() => setDisplayMode("list")} title={t("tableView")} icon={<IconTable />} />
+              <ToggleBtn active={displayMode === "preview"} onClick={() => setDisplayMode("preview")} title={t("previewView")} icon={<IconPreview />} />
             </ToggleGroup>
 
             {/* Layer toggles */}
             <ToggleGroup>
-              <ToggleBtn active={groupByDate} onClick={() => { setSortBy("date"); setGroupByDate(v => !v); }} title="Group by date" icon={<IconCalendar />} />
+              <ToggleBtn active={groupByDate} onClick={() => { setSortBy("date"); setGroupByDate(v => !v); }} title={t("groupByDate")} icon={<IconCalendar />} />
             </ToggleGroup>
 
             <select
               value={sortBy}
               onChange={(e) => { const next = e.target.value as typeof sortBy; setSortBy(next); if (next !== "date") setGroupByDate(false); }}
-              title="Sort order"
+              title={t("sortOrder")}
               style={{
                 background: "var(--card)", border: "1px solid var(--border-hover)",
                 borderRadius: 7, padding: "0 8px", color: "var(--text-2)",
@@ -1950,9 +1957,9 @@ export default function App() {
                 height: 30, boxSizing: "border-box",
               }}
             >
-              <option value="date">Date Added</option>
-              <option value="name">Name A–Z</option>
-              <option value="ranking">Ranking</option>
+              <option value="date">{t("dateAdded")}</option>
+              <option value="name">{t("nameAZ")}</option>
+              <option value="ranking">{t("ranking")}</option>
             </select>
 
             <div ref={dataMenuRef} style={{ position: "relative" }}>
@@ -1989,7 +1996,7 @@ export default function App() {
                     setShowDataMenu(false);
                   }
                 }}
-                aria-label="My Data"
+                aria-label={t("myData")}
                 style={{
                   background: "var(--card)", border: "1px solid var(--border-hover)",
                   borderRadius: 7,
@@ -2000,7 +2007,7 @@ export default function App() {
                   width: cleanupState.running ? 102 : 96,
                 }}
               >
-                <option value="my-data">My Data</option>
+                <option value="my-data">{t("myData")}</option>
               </select>
 
               {showDataMenu && (
@@ -2012,19 +2019,19 @@ export default function App() {
                 }}>
                   <DataMenuItem
                     icon={<img src="/broom.png" alt="" style={{ width: 17, height: 17, opacity: 0.65, filter: "var(--icon-filter)" }} />}
-                    label="Clean Up"
+                    label={t("cleanUp")}
                     disabled={cleanupState.running}
                     onClick={() => { setShowDataMenu(false); handleCleanup(); }}
                   />
                   <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
-                  <DataMenuItem icon={<img src="/file-import.png" alt="" style={{ width: 17, height: 17, opacity: 0.65, filter: "var(--icon-filter)" }} />} label="Import" onClick={() => { setShowDataMenu(false); setShowImport(true); }} />
-                  <DataMenuItem icon={<img src="/import-export.png" alt="" style={{ width: 17, height: 17, opacity: 0.65, filter: "var(--icon-filter)" }} />} label="Export" onClick={() => { setShowDataMenu(false); setShowExport(true); }} />
+                  <DataMenuItem icon={<img src="/file-import.png" alt="" style={{ width: 17, height: 17, opacity: 0.65, filter: "var(--icon-filter)" }} />} label={t("import")} onClick={() => { setShowDataMenu(false); setShowImport(true); }} />
+                  <DataMenuItem icon={<img src="/import-export.png" alt="" style={{ width: 17, height: 17, opacity: 0.65, filter: "var(--icon-filter)" }} />} label={t("export")} onClick={() => { setShowDataMenu(false); setShowExport(true); }} />
                   <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
-                  <DataMenuItem icon="💾" label="Backup" onClick={() => { setShowDataMenu(false); handleBackup(); }} />
-                  <DataMenuItem icon="📂" label="Restore" onClick={() => { setShowDataMenu(false); restoreFileRef.current?.click(); }} />
+                  <DataMenuItem icon="💾" label={t("backup")} onClick={() => { setShowDataMenu(false); handleBackup(); }} />
+                  <DataMenuItem icon="📂" label={t("restore")} onClick={() => { setShowDataMenu(false); restoreFileRef.current?.click(); }} />
                   <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
-                  <DataMenuItem icon="🏷️" label="Clear All Tags" danger onClick={() => { setShowDataMenu(false); setShowClearAllTags(true); }} />
-                  <DataMenuItem icon="🗑️" label="Delete All" danger onClick={() => { setShowDataMenu(false); setShowDeleteAll(true); }} />
+                  <DataMenuItem icon="🏷️" label={t("clearAllTags")} danger onClick={() => { setShowDataMenu(false); setShowClearAllTags(true); }} />
+                  <DataMenuItem icon="🗑️" label={t("deleteAll")} danger onClick={() => { setShowDataMenu(false); setShowDeleteAll(true); }} />
                 </div>
               )}
             </div>
@@ -2051,7 +2058,7 @@ export default function App() {
                   />
                 )}
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  Save tab
+                  {t("saveTab")}
                 </span>
               </button>
             )}
@@ -2060,7 +2067,7 @@ export default function App() {
               padding: "6px 12px", background: "#3b82f6", border: "none",
               borderRadius: 7, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer",
             }}>
-              <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> Add
+              <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> {t("add")}
             </button>
           </header>
 
@@ -2519,15 +2526,15 @@ export default function App() {
             >
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span style={{ fontSize: 22 }}><BroomIcon /></span>
-                <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", margin: 0 }}>Clean Up complete</h2>
+                <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", margin: 0 }}>{t("cleanUpComplete")}</h2>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <ResultRow icon="🗑️" label="Duplicates Removed" value={cleanupResult.removed} />
-                <ResultRow icon="🔍" label="Missing Descriptions" value={`${cleanupResult.missingFixed} of ${cleanupResult.missingFound}`} dim={cleanupResult.missingFound === 0} />
-                <ResultRow icon="⚠️" label="Not Reachable" value={cleanupResult.notReachable} />
+                <ResultRow icon="🗑️" label={t("duplicatesRemoved")} value={cleanupResult.removed} />
+                <ResultRow icon="🔍" label={t("missingDescriptions")} value={`${cleanupResult.missingFixed} of ${cleanupResult.missingFound}`} dim={cleanupResult.missingFound === 0} />
+                <ResultRow icon="⚠️" label={t("notReachable")} value={cleanupResult.notReachable} />
               </div>
               {cleanupResult.removed === 0 && cleanupResult.missingFound === 0 && cleanupResult.notReachable === 0 && (
-                <p style={{ fontSize: 13, color: "var(--text-3)", margin: 0 }}>Everything looks clean — no duplicates, missing descriptions, or unreachable bookmarks found.</p>
+                <p style={{ fontSize: 13, color: "var(--text-3)", margin: 0 }}>{t("everythingLooksClean")}</p>
               )}
               <button
                 onClick={() => setCleanupResult(null)}
@@ -2537,7 +2544,7 @@ export default function App() {
                   fontSize: 13, cursor: "pointer", fontWeight: 600,
                 }}
               >
-                Done
+                {t("done")}
               </button>
             </div>
           </div>
@@ -2799,20 +2806,49 @@ function IconExpandTabs() {
   );
 }
 
-function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onBookmarkDrop, onTagReorder }: {
+function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onClear, onChangeColor, onBookmarkDrop, onTagReorder }: {
   tag: string; count: number; active: boolean;
   onSelect: () => void;
   onRename: (newName: string) => void;
   onDelete: () => void;
+  onClear: () => void;
+  onChangeColor: () => void;
   onBookmarkDrop: (bookmarkId: string) => void;
   onTagReorder: (draggedTag: string, targetTag: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [editing, setEditing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const skipSave = useRef(false);
   const c = tagColor(tag);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const closeOnOutsideClick = (e: MouseEvent) => {
+      if (!contextMenuRef.current) return;
+      if (!contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    const closeOnEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setContextMenu(null);
+    };
+    const closeOnResize = () => setContextMenu(null);
+    const closeOnScroll = () => setContextMenu(null);
+    window.addEventListener("click", closeOnOutsideClick);
+    window.addEventListener("resize", closeOnResize);
+    window.addEventListener("scroll", closeOnScroll, true);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("click", closeOnOutsideClick);
+      window.removeEventListener("resize", closeOnResize);
+      window.removeEventListener("scroll", closeOnScroll, true);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [contextMenu]);
 
   const handleSave = () => {
     if (skipSave.current) { skipSave.current = false; return; }
@@ -2846,6 +2882,10 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onBoo
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setContextMenu({ x: e.clientX, y: e.clientY });
+      }}
       draggable={!editing}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
@@ -2918,6 +2958,44 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onBoo
           </button>
         </div>
       )}
+
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "fixed",
+            left: contextMenu.x,
+            top: contextMenu.y,
+            minWidth: 138,
+            background: "var(--card)",
+            border: "1px solid var(--border-hover)",
+            borderRadius: 8,
+            boxShadow: "0 10px 26px rgba(0,0,0,0.45)",
+            padding: 4,
+            zIndex: 3000,
+          }}
+        >
+          <button
+            onClick={() => {
+              onClear();
+              setContextMenu(null);
+            }}
+            style={tagContextMenuBtn}
+          >
+            Clear Tag
+          </button>
+          <button
+            onClick={() => {
+              onChangeColor();
+              setContextMenu(null);
+            }}
+            style={tagContextMenuBtn}
+          >
+            Change Color
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -2927,6 +3005,19 @@ const tagActionBtn: React.CSSProperties = {
   width: 22, height: 22, borderRadius: 5, border: "none",
   background: "var(--border-hover)", color: "var(--text-3)",
   cursor: "pointer", fontSize: 12, flexShrink: 0,
+};
+
+const tagContextMenuBtn: React.CSSProperties = {
+  display: "block",
+  width: "100%",
+  textAlign: "left",
+  padding: "7px 10px",
+  border: "none",
+  borderRadius: 6,
+  background: "none",
+  color: "var(--text-2)",
+  fontSize: 13,
+  cursor: "pointer",
 };
 
 function DataMenuItem({ icon, label, onClick, disabled, danger }: { icon: React.ReactNode; label: string; onClick: () => void; disabled?: boolean; danger?: boolean }) {

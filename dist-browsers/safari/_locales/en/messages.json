@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "BookmarkMaster"
+  },
+  "extDescription": {
+    "message": "Save and organize bookmarks with tags, search, and multiple views"
+  },
+  "actionTitle": {
+    "message": "BookmarkMaster"
+  },
+  "contextSaveToBookmarkMaster": {
+    "message": "Save to BookmarkMaster"
+  }
+}

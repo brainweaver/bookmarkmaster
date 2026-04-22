@@ -35,9 +35,11 @@ const TAG_FALLBACK_PALETTE = [
 
 const TAG_DYNAMIC_COLOR_MAP_KEY = "ui_tag_dynamic_colors_v1";
 const TAG_LAST_ASSIGNED_COLOR_KEY = "ui_tag_last_assigned_color_v1";
+const TAG_COLOR_OVERRIDE_MAP_KEY = "ui_tag_color_overrides_v1";
 
 let dynamicTagColorMap: Record<string, string> | null = null;
 let lastAssignedDynamicColor: string | null = null;
+let tagColorOverrideMap: Record<string, string> | null = null;
 
 function loadDynamicTagColorMap(): Record<string, string> {
   if (dynamicTagColorMap) return dynamicTagColorMap;
@@ -110,8 +112,59 @@ function assignDynamicTagColor(tag: string): string {
   return chosen;
 }
 
+function loadTagColorOverrideMap(): Record<string, string> {
+  if (tagColorOverrideMap) return tagColorOverrideMap;
+  try {
+    const raw = localStorage.getItem(TAG_COLOR_OVERRIDE_MAP_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      tagColorOverrideMap = Object.fromEntries(
+        Object.entries(parsed).filter(([k, v]) => typeof k === "string" && typeof v === "string")
+      ) as Record<string, string>;
+    } else {
+      tagColorOverrideMap = {};
+    }
+  } catch {
+    tagColorOverrideMap = {};
+  }
+  return tagColorOverrideMap ?? {};
+}
+
+function saveTagColorOverrideMap(map: Record<string, string>) {
+  try {
+    localStorage.setItem(TAG_COLOR_OVERRIDE_MAP_KEY, JSON.stringify(map));
+  } catch {
+    // best-effort persistence only
+  }
+}
+
 export function tagColor(tag: string) {
-  return TAG_COLORS[tag] ?? assignDynamicTagColor(tag);
+  const key = tag.trim().toLowerCase();
+  const overrides = loadTagColorOverrideMap();
+  return overrides[key] ?? TAG_COLORS[key] ?? assignDynamicTagColor(key);
+}
+
+export function cycleTagColor(tag: string): string {
+  const key = tag.trim().toLowerCase();
+  if (!key) return TAG_FALLBACK_PALETTE[0];
+
+  const current = tagColor(key);
+  const idx = TAG_FALLBACK_PALETTE.indexOf(current);
+  const next = TAG_FALLBACK_PALETTE[(idx + 1 + TAG_FALLBACK_PALETTE.length) % TAG_FALLBACK_PALETTE.length];
+
+  const overrides = loadTagColorOverrideMap();
+  overrides[key] = next;
+  tagColorOverrideMap = overrides;
+  saveTagColorOverrideMap(overrides);
+
+  const dynamic = loadDynamicTagColorMap();
+  if (dynamic[key]) {
+    dynamic[key] = next;
+    lastAssignedDynamicColor = next;
+    saveDynamicTagColorMap(dynamic, next);
+  }
+
+  return next;
 }
 
 interface Props {

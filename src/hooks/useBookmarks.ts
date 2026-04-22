@@ -231,6 +231,13 @@ export function useBookmarks() {
     [bookmarks, commit]
   );
 
+  const clearTag = useCallback(
+    (name: string) => {
+      commit(bookmarks.map((b) => ({ ...b, tags: b.tags.filter((t) => t !== name) })));
+    },
+    [bookmarks, commit]
+  );
+
   const importBookmarks = useCallback(
     (items: Omit<Bookmark, "id">[]) => {
       const current = load();
@@ -295,5 +302,5 @@ export function useBookmarks() {
     setBookmarks([...next]);
   }, []);
 
-  return { bookmarks, customTags, addBookmark, updateBookmark, removeBookmark, importBookmarks, renameTag, deleteTag, addTag, replaceBookmarks, replaceCustomTags, patchBookmark, allTags };
+  return { bookmarks, customTags, addBookmark, updateBookmark, removeBookmark, importBookmarks, renameTag, deleteTag, clearTag, addTag, replaceBookmarks, replaceCustomTags, patchBookmark, allTags };
 }
