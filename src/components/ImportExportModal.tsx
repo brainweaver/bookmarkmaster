@@ -24,6 +24,16 @@ type Phase =
   | { kind: "done"; message: string }
   | { kind: "error"; message: string };
 
+type ParsedRawBookmark = {
+  title?: string;
+  url: string;
+  description?: string;
+  keywords?: string[];
+  tags?: string[];
+  favicon?: string;
+  addedAt?: string;
+};
+
 export default function ImportExportModal({ bookmarks, onImport, onClose, selectedTag, allTags, section }: Props) {
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [importTags, setImportTags] = useState<string[]>(selectedTag ? [selectedTag] : []);
@@ -77,32 +87,67 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
     fileRef.current?.click();
   }
 
-  function parseRawFromInputText(text: string): Array<{ title: string; url: string }> {
+  function parseRawFromInputText(text: string): ParsedRawBookmark[] {
+    const fromUnknown = (value: unknown): ParsedRawBookmark | null => {
+      if (!value || typeof value !== "object") return null;
+      const entry = value as Record<string, unknown>;
+      const url = String(entry.url ?? entry.href ?? "").trim();
+      if (!url.startsWith("http")) return null;
+
+      const rawKeywords = entry.keywords;
+      const keywords = Array.isArray(rawKeywords)
+        ? rawKeywords.map((k) => String(k ?? "").trim()).filter(Boolean)
+        : undefined;
+
+      const rawTags = entry.tags;
+      const tags = Array.isArray(rawTags)
+        ? rawTags.map((t) => String(t ?? "").trim()).filter(Boolean)
+        : undefined;
+
+      return {
+        title: String(entry.title ?? entry.name ?? "").trim() || undefined,
+        url,
+        description: String(entry.description ?? "").trim() || undefined,
+        keywords,
+        tags,
+        favicon: String(entry.favicon ?? entry.icon ?? "").trim() || undefined,
+        addedAt: String(entry.addedAt ?? "").trim() || undefined,
+      };
+    };
+
     try {
       const parsed = JSON.parse(text);
+
+      if (parsed && typeof parsed === "object" && Array.isArray((parsed as { bookmarks?: unknown }).bookmarks)) {
+        const raw = (parsed as { bookmarks: unknown[] }).bookmarks
+          .map((entry) => fromUnknown(entry))
+          .filter((v): v is ParsedRawBookmark => v !== null);
+        if (raw.length > 0) return raw;
+      }
+
       if (Array.isArray(parsed)) {
         const raw = parsed
-          .map((p) => ({ title: String((p as { title?: unknown }).title ?? ""), url: String((p as { url?: unknown }).url ?? "") }))
-          .filter((r) => r.url.startsWith("http"));
+          .map((entry) => fromUnknown(entry))
+          .filter((v): v is ParsedRawBookmark => v !== null);
         if (raw.length > 0) return raw;
       }
     } catch {}
 
     const htmlRaw = parseHTMLBookmarks(text);
-    if (htmlRaw.length > 0) return htmlRaw;
+    if (htmlRaw.length > 0) return htmlRaw.map((r) => ({ title: r.title, url: r.url }));
 
     return text
       .split(/[\n\r,\s]+/)
       .map((s) => s.trim())
       .filter((s) => s.startsWith("http"))
-      .map((url) => {
+      .map((url): ParsedRawBookmark | null => {
         try {
           return { title: new URL(url).hostname, url };
         } catch {
           return null;
         }
       })
-      .filter((v): v is { title: string; url: string } => v !== null);
+      .filter((v): v is ParsedRawBookmark => v !== null);
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -137,8 +182,8 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
     const raw = lines.map((url) => {
       let hostname = "";
       try { hostname = new URL(url).hostname; } catch { return null; }
-      return { title: hostname, url };
-    }).filter(Boolean) as Array<{ title: string; url: string }>;
+      return { title: hostname, url } satisfies ParsedRawBookmark;
+    }).filter(Boolean) as ParsedRawBookmark[];
     const items = rawToBookmarks(raw, existingUrls);
     const skipped = raw.filter((r) => existingUrls.has(r.url)).length;
     if (items.length === 0 && skipped === 0) {
@@ -204,9 +249,23 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
     }
   }
   function handleExportJSON() {
+    const payload = {
+      format: "bookmarkmaster-bookmarks",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      bookmarks: exportBookmarks.map((b) => ({
+        title: b.title,
+        url: b.url,
+        description: b.description ?? "",
+        keywords: b.keywords ?? [],
+        tags: b.tags ?? [],
+        favicon: b.favicon,
+        addedAt: b.addedAt,
+      })),
+    };
     triggerDownload(
       "bookmarks.json",
-      JSON.stringify(exportBookmarks, null, 2),
+      JSON.stringify(payload, null, 2),
       "application/json"
     );
     setPhase({ kind: "done", message: `Downloaded bookmarks.json (${exportBookmarks.length} bookmarks).` });

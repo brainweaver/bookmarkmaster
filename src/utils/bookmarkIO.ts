@@ -63,7 +63,15 @@ export function parseHTMLBookmarks(
 
 /** Convert raw {title, url} pairs to our Bookmark shape, skipping existing URLs. */
 export function rawToBookmarks(
-  raw: Array<{ title: string; url: string }>,
+  raw: Array<{
+    title?: string;
+    url: string;
+    description?: string;
+    keywords?: string[];
+    tags?: string[];
+    favicon?: string;
+    addedAt?: string;
+  }>,
   existingUrls: Set<string>
 ): Omit<Bookmark, "id">[] {
   const seen = new Set<string>();
@@ -77,14 +85,23 @@ export function rawToBookmarks(
     let hostname = "";
     try { hostname = new URL(r.url).hostname; } catch { continue; }
 
+    const cleanDescription = String(r.description ?? "").trim();
+    const cleanKeywords = Array.isArray(r.keywords)
+      ? Array.from(new Set(r.keywords.map((k) => String(k ?? "").trim().toLowerCase()).filter(Boolean)))
+      : [];
+    const cleanTags = Array.isArray(r.tags)
+      ? Array.from(new Set(r.tags.map((t) => String(t ?? "").trim().toLowerCase().replace(/\s+/g, "-")).filter(Boolean)))
+      : [];
+    const cleanFavicon = String(r.favicon ?? "").trim();
+
     result.push({
-      title: r.title || hostname,
+      title: String(r.title ?? "").trim() || hostname,
       url: r.url,
-      description: undefined,
-      keywords: [],
-      tags: [],
-      favicon: `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`,
-      addedAt: today,
+      description: cleanDescription || undefined,
+      keywords: cleanKeywords,
+      tags: cleanTags,
+      favicon: cleanFavicon || `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`,
+      addedAt: clampDateKeyToToday(String(r.addedAt ?? today)),
     });
   }
   return result;

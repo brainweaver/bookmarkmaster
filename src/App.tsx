@@ -1970,7 +1970,7 @@ export default function App() {
                   <CleanupProgressRing percent={cleanupPercent} />
                 ) : null}
                 My Data
-                <span style={{ fontSize: 9, opacity: 0.5, marginLeft: 1 }}>▾</span>
+                <span style={{ fontSize: 10, opacity: 0.8, marginLeft: 2 }}>▼</span>
               </button>
 
               {showDataMenu && (

@@ -20,8 +20,31 @@ export const TAG_COLORS: Record<string, string> = {
   tools: "#34d399",
 };
 
+const TAG_FALLBACK_PALETTE = [
+  "#22c55e", // green
+  "#3b82f6", // blue
+  "#f59e0b", // amber
+  "#a855f7", // violet
+  "#ef4444", // red
+  "#06b6d4", // cyan
+  "#ec4899", // pink
+  "#84cc16", // lime
+  "#f97316", // orange
+  "#14b8a6", // teal
+];
+
+function colorForUnknownTag(tag: string): string {
+  const key = tag.trim().toLowerCase();
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
+  }
+  const idx = Math.abs(hash) % TAG_FALLBACK_PALETTE.length;
+  return TAG_FALLBACK_PALETTE[idx];
+}
+
 export function tagColor(tag: string) {
-  return TAG_COLORS[tag] ?? "#6b7280";
+  return TAG_COLORS[tag] ?? colorForUnknownTag(tag);
 }
 
 interface Props {
