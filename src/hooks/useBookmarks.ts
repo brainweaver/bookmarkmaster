@@ -11,8 +11,18 @@ const CUSTOM_TAGS_KEY = "custom_tags_v1";
 function load(): Bookmark[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return normaliseBookmarks(JSON.parse(raw));
-  } catch {}
+    if (raw) {
+      const parsed = JSON.parse(raw) as Bookmark[];
+      const normalized = normaliseBookmarks(parsed);
+      // Persist migration/sanitization updates for previously saved data.
+      if (JSON.stringify(parsed) !== JSON.stringify(normalized)) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+      }
+      return normalized;
+    }
+  } catch {
+    // Ignore malformed local storage; fall back to mock bookmarks.
+  }
   return normaliseBookmarks(MOCK_BOOKMARKS);
 }
 
@@ -24,7 +34,9 @@ function loadCustomTags(): string[] {
   try {
     const raw = localStorage.getItem(CUSTOM_TAGS_KEY);
     if (raw) return JSON.parse(raw);
-  } catch {}
+  } catch {
+    // Ignore malformed custom tags storage and return an empty list.
+  }
   return [];
 }
 
@@ -32,24 +44,27 @@ function saveCustomTags(tags: string[]) {
   localStorage.setItem(CUSTOM_TAGS_KEY, JSON.stringify(tags));
 }
 
-function normaliseKeywords(keywords?: string[]): string[] | undefined {
-  if (!Array.isArray(keywords)) return undefined;
-  const cleaned = Array.from(
-    new Set(
-      keywords
-        .map((k) => String(k ?? "").trim().toLowerCase())
-        .filter(Boolean)
-    )
-  );
-  return cleaned.length > 0 ? cleaned : undefined;
-}
-
 function normaliseBookmarks(items: Bookmark[]): Bookmark[] {
-  return items.map((b) => ({
-    ...b,
-    keywords: normaliseKeywords(b.keywords),
-    addedAt: clampDateKeyToToday(b.addedAt),
-  }));
+  return items.reduce<Bookmark[]>((acc, b) => {
+    const raw = b as Partial<Bookmark> & Record<string, unknown>;
+    const id = String(raw.id ?? "").trim();
+    const title = String(raw.title ?? "").trim();
+    const url = String(raw.url ?? "").trim();
+    const favicon = String(raw.favicon ?? "").trim();
+    if (!id || !title || !url || !favicon) return acc;
+    const rawTags = Array.isArray(raw.tags) ? raw.tags : [];
+    acc.push({
+      id,
+      title,
+      url,
+      description: typeof raw.description === "string" ? raw.description : undefined,
+      tags: Array.from(new Set(rawTags.map((t) => String(t)).filter(Boolean))),
+      favicon,
+      addedAt: clampDateKeyToToday(String(raw.addedAt ?? localDateKey())),
+      ranking: typeof raw.ranking === "number" ? raw.ranking : undefined,
+    });
+    return acc;
+  }, []);
 }
 
 function normaliseUrlForImportDedupe(rawUrl: string): string {
@@ -107,6 +122,17 @@ function isGenericYoutubeDescription(description?: string): boolean {
   return d.includes("enjoy the videos and music you love");
 }
 
+function isHostnameLikeTitle(title: string, url: string): boolean {
+  const normalizedTitle = title.trim().toLowerCase().replace(/^www\./, "").replace(/\/+$/, "");
+  if (!normalizedTitle) return true;
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    return normalizedTitle === host;
+  } catch {
+    return false;
+  }
+}
+
 export function useBookmarks() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(load);
   const [customTags, setCustomTags] = useState<string[]>(loadCustomTags);
@@ -127,7 +153,6 @@ export function useBookmarks() {
       (b) =>
         (
           !b.description?.trim() ||
-          !b.keywords?.length ||
           (isYoutubeUrl(b.url) && (isGenericYoutubeTitle(b.title) || isGenericYoutubeDescription(b.description)))
         ) &&
         !enrichedIds.current.has(b.id)
@@ -143,19 +168,18 @@ export function useBookmarks() {
         const shouldRefreshYoutube = isYoutubeUrl(bookmark.url) && (
           isGenericYoutubeTitle(bookmark.title) || isGenericYoutubeDescription(bookmark.description)
         );
+        const shouldRefreshGenericTitle = isHostnameLikeTitle(bookmark.title, bookmark.url);
         const nextTitle = meta.title?.trim();
         const nextDescription = meta.description?.trim();
-        const nextKeywords = normaliseKeywords(meta.keywords);
-        if (!nextTitle && !nextDescription && !meta.favicon && !nextKeywords?.length) continue;
+        if (!nextTitle && !nextDescription && !meta.favicon) continue;
 
         const current = load();
         const updated = current.map((b) =>
           b.id === bookmark.id
             ? {
                 ...b,
-                title: shouldRefreshYoutube && nextTitle ? nextTitle : b.title,
+                title: (shouldRefreshYoutube || shouldRefreshGenericTitle) && nextTitle ? nextTitle : b.title,
                 description: nextDescription || b.description,
-                keywords: nextKeywords?.length ? nextKeywords : b.keywords,
                 favicon: meta.favicon || b.favicon,
               }
             : b
@@ -164,7 +188,7 @@ export function useBookmarks() {
         setBookmarks([...updated]);
       }
     })();
-  }, [bookmarks]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bookmarks]);
 
   const addBookmark = useCallback(
     (data: Omit<Bookmark, "id" | "addedAt">) => {

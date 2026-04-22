@@ -4,12 +4,38 @@ import { getYoutubeVideoId } from "./preview";
 // Extension pages have <all_urls> host permission so cross-origin fetch works.
 export async function fetchMeta(
   url: string
-): Promise<{ title?: string; description?: string; favicon?: string; keywords?: string[] }> {
+): Promise<{ title?: string; description?: string; favicon?: string }> {
   const clean = (text?: string | null) =>
     (text ?? "")
       .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
       .replace(/\s+/g, " ")
       .trim();
+
+  const fallbackTitleFromUrl = (rawUrl: string): string => {
+    try {
+      const parsed = new URL(rawUrl);
+      const host = parsed.hostname.replace(/^www\./i, "").toLowerCase();
+      const firstPath = parsed.pathname.split("/").filter(Boolean)[0] ?? "";
+      if (!firstPath) return host;
+      const pathLabel = firstPath
+        .replace(/[-_]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      return pathLabel ? `${host} · ${pathLabel}` : host;
+    } catch {
+      return "";
+    }
+  };
+
+  const fallbackDescriptionFromUrl = (rawUrl: string): string => {
+    try {
+      const parsed = new URL(rawUrl);
+      const host = parsed.hostname.replace(/^www\./i, "").toLowerCase();
+      return `Saved link from ${host}`;
+    } catch {
+      return "";
+    }
+  };
 
   // YouTube pages often return generic metadata when fetched without cookies.
   // Prefer oEmbed for stable, video-specific title/channel info.
@@ -46,7 +72,6 @@ export async function fetchMeta(
             title,
             description,
             favicon: "https://www.youtube.com/favicon.ico",
-            keywords: ["youtube", "video"],
           };
         }
       } catch {
@@ -61,7 +86,11 @@ export async function fetchMeta(
       // Avoid sending cookies — we only want public metadata
       credentials: "omit",
     });
-    if (!res.ok) return {};
+    if (!res.ok) {
+      const title = fallbackTitleFromUrl(url);
+      const description = fallbackDescriptionFromUrl(url);
+      return { title, description };
+    }
 
     const html = await res.text();
     const doc = new DOMParser().parseFromString(html, "text/html");
@@ -78,21 +107,6 @@ export async function fetchMeta(
       clean(doc.querySelector('meta[name="twitter:description"]')?.getAttribute("content")) ||
       (firstParagraph.length >= 24 ? firstParagraph : "");
 
-    const rawKeywords =
-      clean(doc.querySelector('meta[name="keywords"]')?.getAttribute("content")) ||
-      clean(doc.querySelector('meta[name="news_keywords"]')?.getAttribute("content")) ||
-      clean(doc.querySelector('meta[property="article:tag"]')?.getAttribute("content")) ||
-      "";
-
-    const keywords = Array.from(
-      new Set(
-        rawKeywords
-          .split(/[;,]/)
-          .map((k) => clean(k).toLowerCase())
-          .filter(Boolean)
-      )
-    );
-
     const faviconHref =
       doc.querySelector('link[rel~="icon"]')?.getAttribute("href") ||
       "/favicon.ico";
@@ -104,9 +118,15 @@ export async function fetchMeta(
       favicon = new URL("/favicon.ico", url).href;
     }
 
-    return { title, description, favicon, keywords };
+    return {
+      title: title || fallbackTitleFromUrl(url),
+      description: description || fallbackDescriptionFromUrl(url),
+      favicon,
+    };
   } catch {
-    return {};
+    const title = fallbackTitleFromUrl(url);
+    const description = fallbackDescriptionFromUrl(url);
+    return { title, description };
   }
 }
 
@@ -120,7 +140,9 @@ export async function isReachable(url: string): Promise<boolean> {
     if (head.ok) return true;
     // Some servers reject HEAD but allow GET.
     if (head.status !== 405 && head.status !== 501) return false;
-  } catch {}
+  } catch {
+    // Network/DNS/CORS failures fall through to GET fallback.
+  }
 
   try {
     const get = await fetch(url, {

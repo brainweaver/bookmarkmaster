@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Bookmark } from "../data/mockBookmarks";
-import { tagColor } from "./BookmarkCard";
+import { tagColor } from "../utils/tagColors";
 import { visibleTags } from "../constants/tags";
 import { previewCandidatesForLink } from "../utils/preview";
 
@@ -72,9 +72,16 @@ function ListRow({ bookmark, zoom, colWidths, onTagClick, onEdit, onDelete, onDr
   const previewSrc = previewSources[Math.min(previewIndex, Math.max(0, previewSources.length - 1))] || "";
 
   useEffect(() => {
-    setPreviewLoaded(false);
-    setPreviewError(false);
-    setPreviewIndex(0);
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setPreviewLoaded(false);
+      setPreviewError(false);
+      setPreviewIndex(0);
+    });
+    return () => {
+      active = false;
+    };
   }, [bookmark.url]);
 
   return (

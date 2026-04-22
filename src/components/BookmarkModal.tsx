@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { Bookmark } from "../data/mockBookmarks";
-import { tagColor } from "./BookmarkCard";
+import { tagColor } from "../utils/tagColors";
 import { isSystemTag, visibleTags } from "../constants/tags";
 
 interface Props {
@@ -17,7 +17,6 @@ export default function BookmarkModal({ initial, prefill, existingTags, onSave, 
   const [url, setUrl] = useState(initial?.url ?? prefill?.url ?? "");
   const [favicon, setFavicon] = useState(initial?.favicon ?? prefill?.favicon ?? "");
   const [description, setDescription] = useState(initial?.description ?? prefill?.description ?? "");
-  const [keywordsInput, setKeywordsInput] = useState((initial?.keywords ?? []).join(", "));
   const [tags, setTags] = useState<string[]>(visibleTags(initial?.tags ?? []));
   const [ranking, setRanking] = useState<number>(initial?.ranking ?? 0);
   const [tagInput, setTagInput] = useState("");
@@ -47,18 +46,6 @@ export default function BookmarkModal({ initial, prefill, existingTags, onSave, 
 
   const removeTag = (tag: string) => setTags((prev) => prev.filter((t) => t !== tag));
 
-  const parseKeywords = (value: string): string[] | undefined => {
-    const cleaned = Array.from(
-      new Set(
-        value
-          .split(",")
-          .map((k) => k.trim().toLowerCase())
-          .filter(Boolean)
-      )
-    );
-    return cleaned.length > 0 ? cleaned : undefined;
-  };
-
   const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" || e.key === ",") {
       e.preventDefault();
@@ -76,7 +63,9 @@ export default function BookmarkModal({ initial, prefill, existingTags, onSave, 
       try {
         const { hostname } = new URL(url.startsWith("http") ? url : `https://${url}`);
         setFavicon(`https://www.google.com/s2/favicons?domain=${hostname}&sz=32`);
-      } catch {}
+      } catch {
+        // Ignore invalid URL while user is typing.
+      }
     }
   };
 
@@ -104,7 +93,6 @@ export default function BookmarkModal({ initial, prefill, existingTags, onSave, 
       url: normalized,
       favicon,
       description: description.trim() || undefined,
-      keywords: parseKeywords(keywordsInput),
       tags: [...tags, ...systemTags],
       ranking: ranking || undefined,
     });
@@ -204,16 +192,6 @@ export default function BookmarkModal({ initial, prefill, existingTags, onSave, 
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="What's this page about?"
-            style={inputStyle(false)}
-          />
-        </Field>
-
-        <Field label="Keywords" hint="optional, comma-separated">
-          <input
-            type="text"
-            value={keywordsInput}
-            onChange={(e) => setKeywordsInput(e.target.value)}
-            placeholder="ai, productivity, docs"
             style={inputStyle(false)}
           />
         </Field>

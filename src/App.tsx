@@ -4,7 +4,7 @@ import TimelineView from "./components/TimelineView";
 import ListView from "./components/ListView";
 import BookmarkModal from "./components/BookmarkModal";
 import ImportExportModal from "./components/ImportExportModal";
-import { cycleTagColor, tagColor } from "./components/BookmarkCard";
+import { cycleTagColor, tagColor } from "./utils/tagColors";
 import { useBookmarks } from "./hooks/useBookmarks";
 import { fetchMeta, isReachable } from "./utils/fetchMeta";
 import { localDateKey } from "./utils/date";
@@ -661,7 +661,9 @@ function loadAppCatalog(): AppGroup[] {
         if (groups.length > 0) return mergeCatalogWithDefaults(groups);
       }
     }
-  } catch {}
+  } catch {
+    // Ignore malformed persisted app catalog and fall back to defaults.
+  }
   return FULL_APP_GROUPS;
 }
 
@@ -678,7 +680,9 @@ function loadAppShortcuts(): AppShortcut[] {
         if (cleaned.length > 0) return cleaned;
       }
     }
-  } catch {}
+  } catch {
+    // Ignore malformed persisted app shortcuts and fall back to defaults.
+  }
 
   return DEFAULT_APP_SHORTCUT_IDS
     .map((id) => PRESET_APP_MAP.get(id))
@@ -764,6 +768,17 @@ function normaliseBookmarkTitle(title: string, url: string): string {
     return new URL(url).hostname.replace(/^www\./i, "");
   } catch {
     return trimmed;
+  }
+}
+
+function isHostnameLikeTitle(title: string, url: string): boolean {
+  const normalizedTitle = title.trim().toLowerCase().replace(/^www\./, "").replace(/\/+$/, "");
+  if (!normalizedTitle) return true;
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    return normalizedTitle === host;
+  } catch {
+    return false;
   }
 }
 
@@ -893,8 +908,10 @@ export default function App() {
       title: params.get("title") ?? "",
       favicon: params.get("favicon") ?? "",
     };
-    setIncomingTab(tab);
-    setModal({ mode: "add", prefill: tab });
+    queueMicrotask(() => {
+      setIncomingTab(tab);
+      setModal({ mode: "add", prefill: tab });
+    });
     // Clean the URL so a refresh doesn't re-trigger
     window.history.replaceState({}, "", window.location.pathname);
   }, []);
@@ -917,15 +934,6 @@ export default function App() {
       }
     };
   }, []);
-
-  useEffect(() => {
-    if (!appsEditMode) return;
-    if (appDragHoverTimerRef.current) {
-      clearTimeout(appDragHoverTimerRef.current);
-      appDragHoverTimerRef.current = null;
-    }
-    setAppDragReadyId(null);
-  }, [appsEditMode]);
 
   useEffect(() => {
     localStorage.setItem(PREF_THEME_KEY, theme);
@@ -959,13 +967,6 @@ export default function App() {
     localStorage.setItem(APP_CATALOG_KEY, JSON.stringify(appCatalog));
   }, [appCatalog]);
 
-  useEffect(() => {
-    setTagOrder((prev) => {
-      const next = prev.filter((t) => allTags.includes(t));
-      return next.length === prev.length ? prev : next;
-    });
-  }, [allTags]);
-
   const filtered = useMemo(() => {
     const tokens = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const tagTokens = tokens.filter((t) => t.startsWith("#")).map((t) => t.slice(1));
@@ -981,7 +982,6 @@ export default function App() {
         !b.title.toLowerCase().includes(q) &&
         !(b.description?.toLowerCase().includes(q)) &&
         !b.url.toLowerCase().includes(q) &&
-        !(b.keywords?.some((k) => k.toLowerCase().includes(q))) &&
         !userTags.some((t) => t.includes(q))
       )) return false;
       return true;
@@ -1062,7 +1062,6 @@ export default function App() {
           url,
           title: meta.title || hostname,
           description: meta.description || undefined,
-          keywords: meta.keywords ?? [],
           favicon: meta.favicon || `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`,
           tags: droppedTags,
           addedAt: localDateKey(),
@@ -1115,13 +1114,14 @@ export default function App() {
         const isWeb = /^https?:\/\//i.test(url);
         let hostname = "";
         if (isWeb) {
-          try { hostname = new URL(url).hostname; } catch {}
+          try { hostname = new URL(url).hostname; } catch {
+            // Ignore invalid URLs for icon hostname fallback.
+          }
         }
         items.push({
           url,
           title: tab.title?.trim() || hostname || url,
           description: undefined,
-          keywords: [],
           favicon: isWeb
             ? (tab.favIconUrl || `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`)
             : (tab.favIconUrl || ""),
@@ -1537,7 +1537,6 @@ export default function App() {
         title: normaliseBookmarkTitle(existing.title || b.title, preferCanonicalUrl(existing.url, b.url)),
         url: preferCanonicalUrl(existing.url, b.url),
         description: existing.description?.trim() ? existing.description : b.description,
-        keywords: Array.from(new Set([...(existing.keywords ?? []), ...(b.keywords ?? [])])),
         favicon: existing.favicon || b.favicon,
         tags: Array.from(new Set([...existing.tags, ...b.tags])),
       };
@@ -1545,8 +1544,8 @@ export default function App() {
     const removedCount = bookmarks.length - deduped.length;
     replaceBookmarks(deduped);
 
-    // Step 2: enrich missing descriptions/keywords and recalculate reachability.
-    const needsMeta = deduped.filter((b) => !b.description?.trim() || !b.keywords?.length);
+    // Step 2: enrich missing descriptions and recalculate reachability.
+    const needsMeta = deduped.filter((b) => !b.description?.trim() || isHostnameLikeTitle(b.title, b.url));
     setCleanupState({ running: true, progress: 0, total: needsMeta.length + deduped.length });
 
     let enrichedCount = 0;
@@ -1555,17 +1554,18 @@ export default function App() {
       const bookmark = needsMeta[i];
       const meta = await fetchMeta(bookmark.url);
       const newDesc = meta.description?.trim() || "";
+      const newTitle = meta.title?.trim() || "";
       const newFavicon = meta.favicon || "";
-      const newKeywords = (meta.keywords ?? []).map((k) => k.trim().toLowerCase()).filter(Boolean);
-      if (newDesc || newFavicon || newKeywords.length > 0) {
+      if (newTitle || newDesc || newFavicon) {
         nextBookmarks = nextBookmarks.map((b) => {
           if (b.id !== bookmark.id) return b;
           const hadDescription = !!b.description?.trim();
+          const shouldReplaceTitle = isHostnameLikeTitle(b.title, b.url) && !!newTitle;
           const updated = {
             ...b,
+            ...(shouldReplaceTitle ? { title: newTitle } : {}),
             ...(newDesc ? { description: newDesc } : {}),
             ...(newFavicon ? { favicon: newFavicon } : {}),
-            ...(newKeywords.length > 0 ? { keywords: Array.from(new Set(newKeywords)) } : {}),
           };
           if (!hadDescription && !!updated.description?.trim()) enrichedCount++;
           return updated;
@@ -1644,7 +1644,14 @@ export default function App() {
                 Apps
               </span>
               <button
-                onClick={() => setAppsEditMode((v) => !v)}
+                onClick={() => {
+                  if (appDragHoverTimerRef.current) {
+                    clearTimeout(appDragHoverTimerRef.current);
+                    appDragHoverTimerRef.current = null;
+                  }
+                  setAppDragReadyId(null);
+                  setAppsEditMode((v) => !v);
+                }}
                 title="Toggle app remove mode"
                 style={{
                   background: appsEditMode ? "var(--border)" : "none", border: "1px solid var(--border-hover)", borderRadius: 5,
@@ -2596,12 +2603,13 @@ function TagChip({ label, count, active, color, onClick, vertical = false }: {
 }
 
 function AppIcon({ app, width, height, radius }: { app: Pick<AppShortcut, "url" | "icon" | "iconUrl">; width: number; height: number; radius: number }) {
-  const sources = useMemo(() => appIconCandidates(app), [app.url, app.icon, app.iconUrl]);
+  const sources = appIconCandidates(app);
   const [idx, setIdx] = useState(0);
+  const sourceKey = `${app.url}|${app.icon ?? ""}|${app.iconUrl ?? ""}`;
 
   useEffect(() => {
-    setIdx(0);
-  }, [sources.join("|")]);
+    queueMicrotask(() => setIdx(0));
+  }, [sourceKey]);
 
   const src = sources[Math.min(idx, Math.max(0, sources.length - 1))] || faviconFromUrl(app.url);
 

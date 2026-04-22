@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from "react";
 import type { Bookmark } from "../data/mockBookmarks";
-import { tagColor } from "./BookmarkCard";
+import { tagColor } from "../utils/tagColors";
 import {
   chromeNodesToBookmarks,
   flattenChromeBookmarks,
@@ -28,7 +28,6 @@ type ParsedRawBookmark = {
   title?: string;
   url: string;
   description?: string;
-  keywords?: string[];
   tags?: string[];
   favicon?: string;
   addedAt?: string;
@@ -94,11 +93,6 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
       const url = String(entry.url ?? entry.href ?? "").trim();
       if (!url.startsWith("http")) return null;
 
-      const rawKeywords = entry.keywords;
-      const keywords = Array.isArray(rawKeywords)
-        ? rawKeywords.map((k) => String(k ?? "").trim()).filter(Boolean)
-        : undefined;
-
       const rawTags = entry.tags;
       const tags = Array.isArray(rawTags)
         ? rawTags.map((t) => String(t ?? "").trim()).filter(Boolean)
@@ -108,7 +102,6 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
         title: String(entry.title ?? entry.name ?? "").trim() || undefined,
         url,
         description: String(entry.description ?? "").trim() || undefined,
-        keywords,
         tags,
         favicon: String(entry.favicon ?? entry.icon ?? "").trim() || undefined,
         addedAt: String(entry.addedAt ?? "").trim() || undefined,
@@ -131,7 +124,9 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
           .filter((v): v is ParsedRawBookmark => v !== null);
         if (raw.length > 0) return raw;
       }
-    } catch {}
+    } catch {
+      // Input may not be JSON; continue with HTML/text parsing fallback.
+    }
 
     const htmlRaw = parseHTMLBookmarks(text);
     if (htmlRaw.length > 0) return htmlRaw.map((r) => ({ title: r.title, url: r.url }));
@@ -257,7 +252,6 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
         title: b.title,
         url: b.url,
         description: b.description ?? "",
-        keywords: b.keywords ?? [],
         tags: b.tags ?? [],
         favicon: b.favicon,
         addedAt: b.addedAt,

@@ -35,7 +35,6 @@ export function chromeNodesToBookmarks(
       title: n.title || hostname,
       url: n.url,
       description: undefined,
-      keywords: [],
       tags: [],
       favicon: `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`,
       addedAt: n.dateAdded
@@ -67,7 +66,6 @@ export function rawToBookmarks(
     title?: string;
     url: string;
     description?: string;
-    keywords?: string[];
     tags?: string[];
     favicon?: string;
     addedAt?: string;
@@ -86,9 +84,6 @@ export function rawToBookmarks(
     try { hostname = new URL(r.url).hostname; } catch { continue; }
 
     const cleanDescription = String(r.description ?? "").trim();
-    const cleanKeywords = Array.isArray(r.keywords)
-      ? Array.from(new Set(r.keywords.map((k) => String(k ?? "").trim().toLowerCase()).filter(Boolean)))
-      : [];
     const cleanTags = Array.isArray(r.tags)
       ? Array.from(new Set(r.tags.map((t) => String(t ?? "").trim().toLowerCase().replace(/\s+/g, "-")).filter(Boolean)))
       : [];
@@ -98,7 +93,6 @@ export function rawToBookmarks(
       title: String(r.title ?? "").trim() || hostname,
       url: r.url,
       description: cleanDescription || undefined,
-      keywords: cleanKeywords,
       tags: cleanTags,
       favicon: cleanFavicon || `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`,
       addedAt: clampDateKeyToToday(String(r.addedAt ?? today)),
