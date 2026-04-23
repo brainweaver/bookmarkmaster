@@ -131,6 +131,8 @@ export async function fetchMeta(
 }
 
 export async function isReachable(url: string): Promise<boolean> {
+  const definitelyMissing = new Set([404, 410]);
+
   try {
     const head = await fetch(url, {
       method: "HEAD",
@@ -138,10 +140,11 @@ export async function isReachable(url: string): Promise<boolean> {
       credentials: "omit",
     });
     if (head.ok) return true;
-    // Some servers reject HEAD but allow GET.
-    if (head.status !== 405 && head.status !== 501) return false;
+    // If server responded, the host is reachable. Only "missing" statuses
+    // should remain candidates for Not Reachable.
+    if (!definitelyMissing.has(head.status)) return true;
   } catch {
-    // Network/DNS/CORS failures fall through to GET fallback.
+    // Fall through to GET fallback.
   }
 
   try {
@@ -149,7 +152,8 @@ export async function isReachable(url: string): Promise<boolean> {
       signal: AbortSignal.timeout(8000),
       credentials: "omit",
     });
-    return get.ok;
+    if (get.ok) return true;
+    return !definitelyMissing.has(get.status);
   } catch {
     return false;
   }

@@ -8,7 +8,7 @@ import { cycleTagColor, tagColor } from "./utils/tagColors";
 import { useBookmarks } from "./hooks/useBookmarks";
 import { fetchMeta, isReachable } from "./utils/fetchMeta";
 import { localDateKey } from "./utils/date";
-import { SYSTEM_TAG_NOT_REACHABLE, visibleTags } from "./constants/tags";
+import { SYSTEM_TAG_NOT_REACHABLE, SYSTEM_TAG_NOT_UNIQUE, visibleTags } from "./constants/tags";
 import type { Bookmark } from "./data/mockBookmarks";
 import { t } from "./i18n";
 
@@ -17,6 +17,7 @@ function gridColumnsFromZoom(zoom: number): number {
   return Math.max(2, Math.min(8, Math.round(8 - normalized * 6)));
 }
 const NOT_TAGGED_FILTER = "__not_tagged__";
+const NOT_UNIQUE_FILTER = SYSTEM_TAG_NOT_UNIQUE;
 const NOT_REACHABLE_FILTER = SYSTEM_TAG_NOT_REACHABLE;
 const BOOKMARK_DRAG_MIME = "application/x-bookmark-id";
 const BOOKMARK_DRAG_FALLBACK_PREFIX = "bookmark:";
@@ -26,6 +27,7 @@ const APP_SHORTCUT_DRAG_FALLBACK_PREFIX = "app-shortcut:";
 const TAG_ORDER_KEY = "ui_tag_order_v1";
 const APP_SHORTCUTS_KEY = "ui_app_shortcuts_v1";
 const APP_CATALOG_KEY = "ui_app_catalog_v1";
+const CLEANUP_BYPASS_TAGS_KEY = "ui_cleanup_bypass_tags_v1";
 
 type AppShortcut = {
   id: string;
@@ -712,6 +714,7 @@ type BackupPreferences = {
   sidebarOpen?: boolean;
   appShortcuts?: AppShortcut[];
   appCatalog?: AppGroup[];
+  cleanupBypassTags?: string[];
 };
 
 type BackupPayloadV2 = {
@@ -760,6 +763,23 @@ function normaliseUrlForDedupe(rawUrl: string): string {
   }
 }
 
+function similarBaseUrlKey(rawUrl: string): string {
+  try {
+    const u = new URL(rawUrl);
+    const host = u.hostname.toLowerCase().replace(/^www\./, "");
+    const segments = u.pathname.split("/").filter(Boolean);
+    const firstSegment = segments[0]?.toLowerCase() ?? "";
+    return firstSegment ? `${host}/${firstSegment}` : host;
+  } catch {
+    return rawUrl
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .split(/[/?#]/)[0] || rawUrl.trim().toLowerCase();
+  }
+}
+
 function preferCanonicalUrl(a: string, b: string): string {
   if (a.startsWith("https://")) return a;
   if (b.startsWith("https://")) return b;
@@ -793,12 +813,16 @@ function normalizeTagName(raw: string): string {
   return raw.trim().toLowerCase().replace(/\s+/g, "-");
 }
 
+function stripSystemTagsFromBookmarks(items: Bookmark[]): Bookmark[] {
+  return items.map((b) => ({ ...b, tags: visibleTags(b.tags) }));
+}
+
 function loadTheme(): ThemeId {
   try {
     const raw = localStorage.getItem(PREF_THEME_KEY);
-    return THEME_CYCLE.includes(raw as ThemeId) ? (raw as ThemeId) : "white";
+    return THEME_CYCLE.includes(raw as ThemeId) ? (raw as ThemeId) : "ocean";
   } catch {
-    return "white";
+    return "ocean";
   }
 }
 
@@ -863,6 +887,21 @@ function loadTagOrder(): string[] {
   }
 }
 
+function loadCleanupBypassTags(): string[] {
+  try {
+    const raw = localStorage.getItem(CLEANUP_BYPASS_TAGS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((x): x is string => typeof x === "string")
+      .map((x) => normalizeTagName(x))
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 export default function App() {
   const { bookmarks, customTags, addBookmark, updateBookmark, removeBookmark, importBookmarks, renameTag, deleteTag, clearTag, addTag, replaceBookmarks, replaceCustomTags, allTags } = useBookmarks();
   const [showImport, setShowImport] = useState(false);
@@ -888,7 +927,7 @@ export default function App() {
   const [collapseTabsLoading, setCollapseTabsLoading] = useState(false);
   const [expandTabsLoading, setExpandTabsLoading] = useState(false);
   const [cleanupState, setCleanupState] = useState<{ running: boolean; progress: number; total: number }>({ running: false, progress: 0, total: 0 });
-  const [cleanupResult, setCleanupResult] = useState<{ removed: number; missingFound: number; missingFixed: number; notReachable: number } | null>(null);
+  const [cleanupResult, setCleanupResult] = useState<{ removed: number; missingFound: number; missingFixed: number; notUnique: number; notReachable: number } | null>(null);
   const [showDataMenu, setShowDataMenu] = useState(false);
   const dataMenuRef = useRef<HTMLDivElement>(null);
   const restoreFileRef = useRef<HTMLInputElement>(null);
@@ -897,6 +936,7 @@ export default function App() {
   const [pendingTagDelete, setPendingTagDelete] = useState<string | null>(null);
   const [, setTagColorVersion] = useState(0);
   const [tagOrder, setTagOrder] = useState<string[]>(loadTagOrder);
+  const [cleanupBypassTags, setCleanupBypassTags] = useState<string[]>(loadCleanupBypassTags);
   const [appCatalog, setAppCatalog] = useState<AppGroup[]>(loadAppCatalog);
   const [appShortcuts, setAppShortcuts] = useState<AppShortcut[]>(loadAppShortcuts);
   const [showAppPicker, setShowAppPicker] = useState(false);
@@ -919,7 +959,7 @@ export default function App() {
   // When opened via extension toolbar click or context menu, URL params carry
   // the originating tab's info — auto-open the add modal with it prefilled.
   const effectiveSelectedTag =
-    selectedTag === NOT_TAGGED_FILTER || selectedTag === NOT_REACHABLE_FILTER
+    selectedTag === NOT_TAGGED_FILTER || selectedTag === NOT_UNIQUE_FILTER || selectedTag === NOT_REACHABLE_FILTER
       ? null
       : selectedTag;
   const orderedSidebarTags = useMemo(() => {
@@ -1017,6 +1057,10 @@ export default function App() {
   }, [tagOrder]);
 
   useEffect(() => {
+    localStorage.setItem(CLEANUP_BYPASS_TAGS_KEY, JSON.stringify(cleanupBypassTags));
+  }, [cleanupBypassTags]);
+
+  useEffect(() => {
     localStorage.setItem(APP_SHORTCUTS_KEY, JSON.stringify(appShortcuts));
   }, [appShortcuts]);
 
@@ -1053,6 +1097,7 @@ export default function App() {
     return bookmarks.filter((b) => {
       const userTags = visibleTags(b.tags);
       if (selectedTag === NOT_TAGGED_FILTER && userTags.length > 0) return false;
+      if (selectedTag === NOT_UNIQUE_FILTER && !b.tags.includes(SYSTEM_TAG_NOT_UNIQUE)) return false;
       if (selectedTag === NOT_REACHABLE_FILTER && !b.tags.includes(SYSTEM_TAG_NOT_REACHABLE)) return false;
       if (effectiveSelectedTag && !b.tags.includes(effectiveSelectedTag)) return false;
       if (tagTokens.some((tag) => !userTags.includes(tag))) return false;
@@ -1081,8 +1126,17 @@ export default function App() {
       });
     }
     else arr.sort((a, b) => b.addedAt.localeCompare(a.addedAt));
+
+    if (selectedTag === NOT_UNIQUE_FILTER) {
+      arr.sort((a, b) => {
+        const ka = similarBaseUrlKey(a.url);
+        const kb = similarBaseUrlKey(b.url);
+        if (ka !== kb) return ka.localeCompare(kb);
+        return a.url.localeCompare(b.url);
+      });
+    }
     return arr;
-  }, [filtered, sortBy, rankOrder]);
+  }, [filtered, sortBy, rankOrder, selectedTag]);
 
   // Date grouping only makes sense when sorted by date
   const effectiveGroupByDate = groupByDate && sortBy === "date";
@@ -1152,7 +1206,7 @@ export default function App() {
     ));
     if (urls.length === 0) return;
     const droppedTags =
-      selectedTag && selectedTag !== NOT_TAGGED_FILTER && selectedTag !== NOT_REACHABLE_FILTER
+      selectedTag && selectedTag !== NOT_TAGGED_FILTER && selectedTag !== NOT_UNIQUE_FILTER && selectedTag !== NOT_REACHABLE_FILTER
         ? [selectedTag]
         : [];
 
@@ -1445,7 +1499,41 @@ export default function App() {
       });
     }
 
+    if (normalized && normalized !== oldName) {
+      setCleanupBypassTags((prev) => {
+        if (!prev.includes(oldName)) return prev;
+        if (prev.includes(normalized)) return prev.filter((t) => t !== oldName);
+        return prev.map((t) => (t === oldName ? normalized : t));
+      });
+    }
+
     renameTag(oldName, newName);
+  };
+
+  const handleClearNotUnique = () => {
+    replaceBookmarks(
+      bookmarks.map((b) => ({
+        ...b,
+        tags: b.tags.filter((t) => t !== SYSTEM_TAG_NOT_UNIQUE),
+      }))
+    );
+  };
+
+  const handleClearNotReachable = () => {
+    replaceBookmarks(
+      bookmarks.map((b) => ({
+        ...b,
+        tags: b.tags.filter((t) => t !== SYSTEM_TAG_NOT_REACHABLE),
+      }))
+    );
+  };
+
+  const handleClearNotTagged = () => {
+    const untaggedCount = bookmarks.filter((b) => visibleTags(b.tags).length === 0).length;
+    if (untaggedCount === 0) return;
+    if (!window.confirm(`Delete ${untaggedCount} untagged bookmarks?`)) return;
+    replaceBookmarks(bookmarks.filter((b) => visibleTags(b.tags).length > 0));
+    if (selectedTag === NOT_TAGGED_FILTER) setSelectedTag(null);
   };
 
   const addAppShortcut = (app: AppShortcut) => {
@@ -1691,9 +1779,10 @@ export default function App() {
   };
 
   const handleBackup = () => {
+    const exportableBookmarks = stripSystemTagsFromBookmarks(bookmarks);
     const payload: BackupPayloadV2 = {
       version: 2,
-      bookmarks,
+      bookmarks: exportableBookmarks,
       customTags,
       preferences: {
         theme,
@@ -1706,6 +1795,7 @@ export default function App() {
         sidebarOpen,
         appShortcuts,
         appCatalog,
+        cleanupBypassTags,
       },
     };
     const data = JSON.stringify(payload, null, 2);
@@ -1728,7 +1818,7 @@ export default function App() {
         // Backward-compatible: legacy backups were bookmark arrays only.
         if (Array.isArray(parsed)) {
           if (!window.confirm(`Restore ${parsed.length} bookmarks? This will replace your current library.`)) return;
-          replaceBookmarks(parsed);
+          replaceBookmarks(stripSystemTagsFromBookmarks(parsed));
           return;
         }
 
@@ -1740,7 +1830,7 @@ export default function App() {
         const count = payload.bookmarks?.length ?? 0;
         if (!window.confirm(`Restore ${count} bookmarks and settings? This will replace your current library and preferences.`)) return;
 
-        replaceBookmarks(payload.bookmarks ?? []);
+        replaceBookmarks(stripSystemTagsFromBookmarks(payload.bookmarks ?? []));
 
         if (Array.isArray(payload.customTags)) {
           replaceCustomTags(payload.customTags);
@@ -1767,6 +1857,14 @@ export default function App() {
           }
           if (typeof prefs.zoom === "number" && Number.isFinite(prefs.zoom)) setZoom(Math.max(1, Math.min(5, prefs.zoom)));
           if (Array.isArray(prefs.tagOrder)) setTagOrder(prefs.tagOrder.filter((t): t is string => typeof t === "string"));
+          if (Array.isArray(prefs.cleanupBypassTags)) {
+            setCleanupBypassTags(
+              prefs.cleanupBypassTags
+                .filter((t): t is string => typeof t === "string")
+                .map((t) => normalizeTagName(t))
+                .filter(Boolean)
+            );
+          }
           if (typeof prefs.sidebarOpen === "boolean") setSidebarOpen(prefs.sidebarOpen);
           if (Array.isArray(prefs.appShortcuts)) {
             const restoredApps = prefs.appShortcuts
@@ -1802,11 +1900,15 @@ export default function App() {
 
   const handleCleanup = async () => {
     if (cleanupState.running) return;
+    const bypassTagSet = new Set(cleanupBypassTags);
+    const isBypassedBookmark = (bookmark: Bookmark) =>
+      bookmark.tags.some((tag) => bypassTagSet.has(tag));
+    const scanCandidates = bookmarks.filter((b) => !isBypassedBookmark(b));
 
     // Step 1: deduplicate by canonical URL (ignores protocol + www), merging tags/details.
     const dedupeIndex = new Map<string, number>();
     const deduped: Bookmark[] = [];
-    for (const b of bookmarks) {
+    for (const b of scanCandidates) {
       const key = normaliseUrlForDedupe(b.url);
       const existingIdx = dedupeIndex.get(key);
       if (existingIdx === undefined) {
@@ -1828,8 +1930,12 @@ export default function App() {
         tags: Array.from(new Set([...existing.tags, ...b.tags])),
       };
     }
-    const removedCount = bookmarks.length - deduped.length;
-    replaceBookmarks(deduped);
+    const removedCount = scanCandidates.length - deduped.length;
+    const dedupedById = new Map(deduped.map((b) => [b.id, b] as const));
+    const afterDedupe = bookmarks
+      .map((b) => (isBypassedBookmark(b) ? b : dedupedById.get(b.id)))
+      .filter((b): b is Bookmark => !!b);
+    replaceBookmarks(afterDedupe);
 
     // Step 2: enrich missing descriptions and recalculate reachability.
     const needsMeta = deduped.filter((b) => !b.description?.trim() || isHostnameLikeTitle(b.title, b.url));
@@ -1875,13 +1981,40 @@ export default function App() {
       }
       setCleanupState((s) => ({ ...s, progress: needsMeta.length + i + 1 }));
     }
-    const notReachableCount = nextBookmarks.filter((b) => b.tags.includes(SYSTEM_TAG_NOT_REACHABLE)).length;
-    replaceBookmarks(nextBookmarks);
+    // Step 3: detect potential duplicates by similar base URL and mark as Not Unique.
+    const baseCounts = new Map<string, number>();
+    for (const b of nextBookmarks) {
+      const key = similarBaseUrlKey(b.url);
+      baseCounts.set(key, (baseCounts.get(key) ?? 0) + 1);
+    }
+
+    nextBookmarks = nextBookmarks.map((b) => {
+      const key = similarBaseUrlKey(b.url);
+      const isNotUnique = (baseCounts.get(key) ?? 0) > 1;
+      const hasNotUniqueTag = b.tags.includes(SYSTEM_TAG_NOT_UNIQUE);
+      if (isNotUnique && !hasNotUniqueTag) {
+        return { ...b, tags: [...b.tags, SYSTEM_TAG_NOT_UNIQUE] };
+      }
+      if (!isNotUnique && hasNotUniqueTag) {
+        return { ...b, tags: b.tags.filter((t) => t !== SYSTEM_TAG_NOT_UNIQUE) };
+      }
+      return b;
+    });
+
+    const cleanedById = new Map(nextBookmarks.map((b) => [b.id, b] as const));
+    const finalBookmarks = afterDedupe
+      .map((b) => (isBypassedBookmark(b) ? b : cleanedById.get(b.id)))
+      .filter((b): b is Bookmark => !!b);
+
+    const notUniqueCount = finalBookmarks.filter((b) => b.tags.includes(SYSTEM_TAG_NOT_UNIQUE)).length;
+    const notReachableCount = finalBookmarks.filter((b) => b.tags.includes(SYSTEM_TAG_NOT_REACHABLE)).length;
+    replaceBookmarks(finalBookmarks);
     setCleanupState({ running: false, progress: 0, total: 0 });
     setCleanupResult({
       removed: removedCount,
       missingFound: needsMeta.length,
       missingFixed: enrichedCount,
+      notUnique: notUniqueCount,
       notReachable: notReachableCount,
     });
   };
@@ -2122,6 +2255,15 @@ export default function App() {
               count={bookmarks.filter((b) => visibleTags(b.tags).length === 0).length}
               active={selectedTag === NOT_TAGGED_FILTER}
               onClick={() => setSelectedTag(selectedTag === NOT_TAGGED_FILTER ? null : NOT_TAGGED_FILTER)}
+              onClear={handleClearNotTagged}
+              vertical
+            />
+            <TagChip
+              label={t("notUnique")}
+              count={bookmarks.filter((b) => b.tags.includes(SYSTEM_TAG_NOT_UNIQUE)).length}
+              active={selectedTag === NOT_UNIQUE_FILTER}
+              onClick={() => setSelectedTag(selectedTag === NOT_UNIQUE_FILTER ? null : NOT_UNIQUE_FILTER)}
+              onClear={handleClearNotUnique}
               vertical
             />
             <TagChip
@@ -2129,6 +2271,7 @@ export default function App() {
               count={bookmarks.filter((b) => b.tags.includes(SYSTEM_TAG_NOT_REACHABLE)).length}
               active={selectedTag === NOT_REACHABLE_FILTER}
               onClick={() => setSelectedTag(selectedTag === NOT_REACHABLE_FILTER ? null : NOT_REACHABLE_FILTER)}
+              onClear={handleClearNotReachable}
               vertical
             />
             <div style={{ height: 6 }} />
@@ -2144,6 +2287,14 @@ export default function App() {
                   onRename={(newName) => handleRenameSidebarTag(tag, newName)}
                   onDelete={() => setPendingTagDelete(tag)}
                   onClear={() => clearTag(tag)}
+                  cleanupBypassed={cleanupBypassTags.includes(tag)}
+                  onToggleCleanupBypass={() => {
+                    setCleanupBypassTags((prev) =>
+                      prev.includes(tag)
+                        ? prev.filter((t) => t !== tag)
+                        : [...prev, tag]
+                    );
+                  }}
                   onChangeColor={() => {
                     cycleTagColor(tag);
                     setTagColorVersion((v) => v + 1);
@@ -2536,6 +2687,7 @@ export default function App() {
                 sidebarOpen,
                 appShortcuts,
                 appCatalog,
+                cleanupBypassTags,
               },
             }}
           />
@@ -2543,7 +2695,7 @@ export default function App() {
 
         {showExport && (
           <ImportExportModal
-            bookmarks={bookmarks}
+            bookmarks={stripSystemTagsFromBookmarks(bookmarks)}
             onImport={importBookmarks}
             onClose={() => setShowExport(false)}
             selectedTag={effectiveSelectedTag}
@@ -2563,6 +2715,7 @@ export default function App() {
                 sidebarOpen,
                 appShortcuts,
                 appCatalog,
+                cleanupBypassTags,
               },
             }}
           />
@@ -2948,6 +3101,7 @@ export default function App() {
                 <button
                   onClick={() => {
                     deleteTag(pendingTagDelete);
+                    setCleanupBypassTags((prev) => prev.filter((t) => t !== pendingTagDelete));
                     if (selectedTag === pendingTagDelete) setSelectedTag(null);
                     setPendingTagDelete(null);
                   }}
@@ -2989,9 +3143,10 @@ export default function App() {
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <ResultRow icon="🗑️" label={t("duplicatesRemoved")} value={cleanupResult.removed} />
                 <ResultRow icon="🔍" label={t("missingDescriptions")} value={`${cleanupResult.missingFixed} of ${cleanupResult.missingFound}`} dim={cleanupResult.missingFound === 0} />
+                <ResultRow icon="🧩" label={t("notUnique")} value={cleanupResult.notUnique} />
                 <ResultRow icon="⚠️" label={t("notReachable")} value={cleanupResult.notReachable} />
               </div>
-              {cleanupResult.removed === 0 && cleanupResult.missingFound === 0 && cleanupResult.notReachable === 0 && (
+              {cleanupResult.removed === 0 && cleanupResult.missingFound === 0 && cleanupResult.notUnique === 0 && cleanupResult.notReachable === 0 && (
                 <p style={{ fontSize: 13, color: "var(--text-3)", margin: 0 }}>{t("everythingLooksClean")}</p>
               )}
               <button
@@ -3024,38 +3179,102 @@ function ResultRow({ icon, label, value, dim }: { icon: string; label: string; v
 
 // ── Small components ─────────────────────────────────────────────────────────
 
-function TagChip({ label, count, active, color, onClick, vertical = false }: {
-  label: string; count: number; active: boolean; color?: string; onClick: () => void; vertical?: boolean;
+function TagChip({ label, count, active, color, onClick, onClear, vertical = false }: {
+  label: string; count: number; active: boolean; color?: string; onClick: () => void; onClear?: () => void; vertical?: boolean;
 }) {
   const c = color ?? "var(--text-2)";
   const [hovered, setHovered] = useState(false);
-  return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-      display: "flex", alignItems: "center", gap: 8,
-      padding: vertical ? "6px 12px" : "4px 10px",
-      borderRadius: vertical ? 6 : 99,
-      border: "none", cursor: "pointer",
-      background: active || hovered ? (color ? color + "22" : "var(--border)") : "transparent",
-      color: active ? (color ?? "var(--text)") : "var(--text-2)",
-      fontSize: 13, fontWeight: active ? 600 : 400,
-      whiteSpace: "nowrap", flexShrink: vertical ? undefined : 0,
-      width: vertical ? "calc(100% - 16px)" : undefined,
-      margin: vertical ? "1px 8px" : undefined,
-      textAlign: "left",
-      transition: "background 0.1s, color 0.1s",
-    }}
-    >
-      {color
-        ? <span style={{ width: 8, height: 8, borderRadius: "50%", background: c, display: "inline-block", flexShrink: 0 }} />
-        : <span style={{ fontSize: 13 }}>◈</span>
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const closeOnOutsideClick = (e: MouseEvent) => {
+      if (!contextMenuRef.current) return;
+      if (!contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
       }
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
-      <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-4)", flexShrink: 0 }}>{count}</span>
-    </button>
+    };
+    const closeOnEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setContextMenu(null);
+    };
+    const closeOnResize = () => setContextMenu(null);
+    const closeOnScroll = () => setContextMenu(null);
+    window.addEventListener("click", closeOnOutsideClick);
+    window.addEventListener("resize", closeOnResize);
+    window.addEventListener("scroll", closeOnScroll, true);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("click", closeOnOutsideClick);
+      window.removeEventListener("resize", closeOnResize);
+      window.removeEventListener("scroll", closeOnScroll, true);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [contextMenu]);
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        onClick={onClick}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        onContextMenu={(e) => {
+          if (!onClear) return;
+          e.preventDefault();
+          setContextMenu({ x: e.clientX, y: e.clientY });
+        }}
+        style={{
+        display: "flex", alignItems: "center", gap: 8,
+        padding: vertical ? "6px 12px" : "4px 10px",
+        borderRadius: vertical ? 6 : 99,
+        border: "none", cursor: "pointer",
+        background: active || hovered ? (color ? color + "22" : "var(--border)") : "transparent",
+        color: active ? (color ?? "var(--text)") : "var(--text-2)",
+        fontSize: 13, fontWeight: active ? 600 : 400,
+        whiteSpace: "nowrap", flexShrink: vertical ? undefined : 0,
+        width: vertical ? "calc(100% - 16px)" : undefined,
+        margin: vertical ? "1px 8px" : undefined,
+        textAlign: "left",
+        transition: "background 0.1s, color 0.1s",
+      }}
+      >
+        {color
+          ? <span style={{ width: 8, height: 8, borderRadius: "50%", background: c, display: "inline-block", flexShrink: 0 }} />
+          : <span style={{ fontSize: 13 }}>◈</span>
+        }
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-4)", flexShrink: 0 }}>{count}</span>
+      </button>
+
+      {contextMenu && onClear && (
+        <div
+          ref={contextMenuRef}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "fixed",
+            left: contextMenu.x,
+            top: contextMenu.y,
+            minWidth: 120,
+            background: "var(--card)",
+            border: "1px solid var(--border-hover)",
+            borderRadius: 8,
+            boxShadow: "0 10px 26px rgba(0,0,0,0.45)",
+            padding: 4,
+            zIndex: 3000,
+          }}
+        >
+          <button
+            onClick={() => {
+              onClear();
+              setContextMenu(null);
+            }}
+            style={tagContextMenuBtn}
+          >
+            Clear
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -3293,12 +3512,14 @@ function IconExpandTabs() {
   );
 }
 
-function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onClear, onChangeColor, onBookmarkDrop, onTagReorder }: {
+function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onClear, cleanupBypassed, onToggleCleanupBypass, onChangeColor, onBookmarkDrop, onTagReorder }: {
   tag: string; count: number; active: boolean;
   onSelect: () => void;
   onRename: (newName: string) => void;
   onDelete: () => void;
   onClear: () => void;
+  cleanupBypassed: boolean;
+  onToggleCleanupBypass: () => void;
   onChangeColor: () => void;
   onBookmarkDrop: (bookmarkId: string) => void;
   onTagReorder: (draggedTag: string, targetTag: string) => void;
@@ -3470,6 +3691,21 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onCle
             style={tagContextMenuBtn}
           >
             Clear Tag
+          </button>
+          <button
+            onClick={() => {
+              onToggleCleanupBypass();
+              setContextMenu(null);
+            }}
+            style={{
+              ...tagContextMenuBtn,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <span>Bypass Clean Up</span>
+            <span style={{ width: 16, textAlign: "right" }}>{cleanupBypassed ? "✓" : ""}</span>
           </button>
           <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
           <button

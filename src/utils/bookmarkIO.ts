@@ -1,5 +1,6 @@
 import type { Bookmark } from "../data/mockBookmarks";
 import { clampDateKeyToToday, localDateKey, unixSecondsFromDateKey } from "./date";
+import { visibleTags } from "../constants/tags";
 
 // ── Chrome bookmark tree ──────────────────────────────────────────────────────
 
@@ -93,7 +94,7 @@ export function rawToBookmarks(
       title: String(r.title ?? "").trim() || hostname,
       url: r.url,
       description: cleanDescription || undefined,
-      tags: cleanTags,
+      tags: visibleTags(cleanTags),
       favicon: cleanFavicon || `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`,
       addedAt: clampDateKeyToToday(String(r.addedAt ?? today)),
     });
