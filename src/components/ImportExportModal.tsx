@@ -39,6 +39,16 @@ type ParsedRawBookmark = {
   addedAt?: string;
 };
 
+function normalizeTag(tag: string): string {
+  return tag.trim().toLowerCase().replace(/\s+/g, "-");
+}
+
+function bookmarkMatchesAllTags(bookmark: Bookmark, tags: string[]): boolean {
+  if (tags.length === 0) return true;
+  const bookmarkTags = new Set(bookmark.tags.map(normalizeTag));
+  return tags.every((tag) => bookmarkTags.has(normalizeTag(tag)));
+}
+
 export default function ImportExportModal({ bookmarks, onImport, onClose, selectedTag, allTags, section, backupPayload }: Props) {
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [importTags, setImportTags] = useState<string[]>(selectedTag ? [selectedTag] : []);
@@ -64,12 +74,25 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
     (t) => t.toLowerCase().includes(exportTagInput.toLowerCase()) && !exportFilterTags.includes(t) && exportTagInput.length > 0
   );
 
-  const exportBookmarks = exportFilterTags.length > 0
-    ? bookmarks.filter((b) => exportFilterTags.every((t) => b.tags.includes(t)))
+  useEffect(() => {
+    if (section !== "export") return;
+    setExportFilterTags(selectedTag ? [normalizeTag(selectedTag)] : []);
+    setExportTagInput("");
+    setShowExportSuggestions(false);
+  }, [section, selectedTag]);
+
+  const activeExportFilterTags = exportFilterTags.length > 0
+    ? exportFilterTags
+    : selectedTag
+      ? [selectedTag]
+      : [];
+
+  const exportBookmarks = activeExportFilterTags.length > 0
+    ? bookmarks.filter((b) => bookmarkMatchesAllTags(b, activeExportFilterTags))
     : bookmarks;
 
   function addTag(tag: string) {
-    const trimmed = tag.trim().toLowerCase().replace(/\s+/g, "-");
+    const trimmed = normalizeTag(tag);
     if (trimmed && !importTags.includes(trimmed)) setImportTags((p) => [...p, trimmed]);
     setTagInput("");
     setShowSuggestions(false);
@@ -238,29 +261,31 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
   async function handleExportChrome() {
     setPhase({ kind: "busy", label: "Exporting to Chrome bookmarks…" });
     try {
-      for (const b of exportBookmarks) {
+      const exportSnapshot = [...exportBookmarks];
+      for (const b of exportSnapshot) {
         await chrome.bookmarks.create({ parentId: "2", title: b.title, url: b.url });
       }
       setPhase({
         kind: "done",
-        message: `Exported ${exportBookmarks.length} bookmark${exportBookmarks.length !== 1 ? "s" : ""} to Other Bookmarks.`,
+        message: `Exported ${exportSnapshot.length} bookmark${exportSnapshot.length !== 1 ? "s" : ""} to Other Bookmarks.`,
       });
     } catch {
       setPhase({ kind: "error", message: "Could not export to Chrome bookmarks." });
     }
   }
   function handleExportJSON() {
+    const exportSnapshot = [...exportBookmarks];
     const payload = backupPayload
       ? {
           version: backupPayload.version,
-          bookmarks: exportBookmarks,
+          bookmarks: exportSnapshot,
           customTags: backupPayload.customTags,
           preferences: backupPayload.preferences,
         }
       : {
           // Fallback shape if backup metadata is not provided by parent.
           version: 2,
-          bookmarks: exportBookmarks,
+          bookmarks: exportSnapshot,
           customTags: [],
           preferences: {},
         };
@@ -269,38 +294,47 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
       JSON.stringify(payload, null, 2),
       "application/json"
     );
-    setPhase({ kind: "done", message: `Downloaded bookmarks.json (${exportBookmarks.length} bookmarks).` });
+    setPhase({ kind: "done", message: `Downloaded bookmarks.json (${exportSnapshot.length} bookmarks).` });
   }
 
   function handleExportToBrowsers() {
-    const html = generateHTMLBookmarks(exportBookmarks);
+    const exportSnapshot = [...exportBookmarks];
+    const html = generateHTMLBookmarks(exportSnapshot);
     triggerDownload("bookmarks-browser-compatible.html", html, "text/html");
     setPhase({
       kind: "done",
-      message: `Downloaded bookmarks-browser-compatible.html (${exportBookmarks.length} bookmarks).`,
+      message: `Downloaded bookmarks-browser-compatible.html (${exportSnapshot.length} bookmarks).`,
     });
   }
 
   function handleExportTXT() {
-    const text = exportBookmarks.map((b) => b.url).join("\n");
+    const exportSnapshot = [...exportBookmarks];
+    const text = exportSnapshot.map((b) => b.url).join("\n");
     triggerDownload("bookmarks.txt", text, "text/plain");
-    setPhase({ kind: "done", message: `Downloaded bookmarks.txt (${exportBookmarks.length} bookmarks).` });
+    setPhase({ kind: "done", message: `Downloaded bookmarks.txt (${exportSnapshot.length} bookmarks).` });
   }
 
   function handleExportCopy() {
-    const text = exportBookmarks.map((b) => b.url).join("\n");
+    const exportSnapshot = [...exportBookmarks];
+    const text = exportSnapshot.map((b) => b.url).join("\n");
     navigator.clipboard
       .writeText(text)
-      .then(() => setPhase({ kind: "done", message: `Copied ${exportBookmarks.length} URLs to clipboard.` }))
+      .then(() => setPhase({ kind: "done", message: `Copied ${exportSnapshot.length} URLs to clipboard.` }))
       .catch(() => setPhase({ kind: "error", message: "Could not copy URLs to clipboard." }));
   }
 
   function triggerDownload(name: string, content: string, type: string) {
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([content], { type }));
+    const blobUrl = URL.createObjectURL(new Blob([content], { type }));
+    a.href = blobUrl;
     a.download = name;
+    a.style.display = "none";
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(a.href);
+    window.setTimeout(() => {
+      URL.revokeObjectURL(blobUrl);
+      a.remove();
+    }, 0);
   }
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -586,7 +620,7 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
                   onKeyDown={(e) => {
                     if ((e.key === "Enter" || e.key === ",") && exportTagInput.trim()) {
                       e.preventDefault();
-                      const t = exportTagInput.trim().toLowerCase().replace(/\s+/g, "-");
+                      const t = normalizeTag(exportTagInput);
                       if (t && !exportFilterTags.includes(t)) setExportFilterTags((p) => [...p, t]);
                       setExportTagInput(""); setShowExportSuggestions(false);
                     }
