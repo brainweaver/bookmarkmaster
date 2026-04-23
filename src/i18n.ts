@@ -104,4 +104,3 @@ export function t(key: MessageKey, params?: Params): string {
     return value === undefined ? "" : String(value);
   });
 }
-

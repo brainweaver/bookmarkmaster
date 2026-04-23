@@ -4,6 +4,7 @@ import { tagColor } from "../utils/tagColors";
 import {
   chromeNodesToBookmarks,
   flattenChromeBookmarks,
+  generateHTMLBookmarks,
   parseHTMLBookmarks,
   rawToBookmarks,
 } from "../utils/bookmarkIO";
@@ -15,6 +16,11 @@ interface Props {
   selectedTag: string | null;
   allTags: string[];
   section?: "import" | "export";
+  backupPayload?: {
+    version: number;
+    customTags: string[];
+    preferences: Record<string, unknown>;
+  };
 }
 
 type Phase =
@@ -33,7 +39,7 @@ type ParsedRawBookmark = {
   addedAt?: string;
 };
 
-export default function ImportExportModal({ bookmarks, onImport, onClose, selectedTag, allTags, section }: Props) {
+export default function ImportExportModal({ bookmarks, onImport, onClose, selectedTag, allTags, section, backupPayload }: Props) {
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [importTags, setImportTags] = useState<string[]>(selectedTag ? [selectedTag] : []);
   const [tagInput, setTagInput] = useState("");
@@ -244,25 +250,35 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
     }
   }
   function handleExportJSON() {
-    const payload = {
-      format: "bookmarkmaster-bookmarks",
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      bookmarks: exportBookmarks.map((b) => ({
-        title: b.title,
-        url: b.url,
-        description: b.description ?? "",
-        tags: b.tags ?? [],
-        favicon: b.favicon,
-        addedAt: b.addedAt,
-      })),
-    };
+    const payload = backupPayload
+      ? {
+          version: backupPayload.version,
+          bookmarks: exportBookmarks,
+          customTags: backupPayload.customTags,
+          preferences: backupPayload.preferences,
+        }
+      : {
+          // Fallback shape if backup metadata is not provided by parent.
+          version: 2,
+          bookmarks: exportBookmarks,
+          customTags: [],
+          preferences: {},
+        };
     triggerDownload(
       "bookmarks.json",
       JSON.stringify(payload, null, 2),
       "application/json"
     );
     setPhase({ kind: "done", message: `Downloaded bookmarks.json (${exportBookmarks.length} bookmarks).` });
+  }
+
+  function handleExportToBrowsers() {
+    const html = generateHTMLBookmarks(exportBookmarks);
+    triggerDownload("bookmarks-browser-compatible.html", html, "text/html");
+    setPhase({
+      kind: "done",
+      message: `Downloaded bookmarks-browser-compatible.html (${exportBookmarks.length} bookmarks).`,
+    });
   }
 
   function handleExportTXT() {
@@ -616,6 +632,13 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
               disabled={isBusy || exportBookmarks.length === 0}
             />
             <ActionBtn
+              icon="🌐"
+              label="Export To Browsers"
+              sub="Browser-compatible bookmarks HTML"
+              onClick={handleExportToBrowsers}
+              disabled={isBusy || exportBookmarks.length === 0}
+            />
+            <ActionBtn
               icon="{}"
               label="Download As Json"
               sub="Full data with tags & descriptions"
@@ -649,7 +672,7 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
 
 function Row({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
       {children}
     </div>
   );

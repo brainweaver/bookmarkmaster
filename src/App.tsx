@@ -42,6 +42,10 @@ type AppGroup = {
   apps: AppShortcut[];
 };
 
+type AppEditorState =
+  | { mode: "edit"; appId: string }
+  | { mode: "icon"; appId: string };
+
 const APP_UTILITIES_GROUP = "App Utilities";
 
 function ensureUrlProtocol(raw: string): string {
@@ -690,6 +694,7 @@ function loadAppShortcuts(): AppShortcut[] {
 }
 
 type DisplayMode = "list" | "grid" | "preview";
+type SortBy = "date" | "name" | "ranking";
 type ModalState =
   | { mode: "closed" }
   | { mode: "add"; prefill?: { url: string; title: string; favicon: string; description?: string } }
@@ -700,7 +705,7 @@ type BackupPreferences = {
   theme?: ThemeId;
   displayMode?: DisplayMode;
   groupByDate?: boolean;
-  sortBy?: "date" | "name" | "ranking";
+  sortBy?: SortBy;
   rankOrder?: string[];
   zoom?: number;
   tagOrder?: string[];
@@ -784,6 +789,10 @@ function isHostnameLikeTitle(title: string, url: string): boolean {
   }
 }
 
+function normalizeTagName(raw: string): string {
+  return raw.trim().toLowerCase().replace(/\s+/g, "-");
+}
+
 function loadTheme(): ThemeId {
   try {
     const raw = localStorage.getItem(PREF_THEME_KEY);
@@ -812,7 +821,7 @@ function loadGroupByDate(): boolean {
   }
 }
 
-function loadSortBy(): "date" | "name" | "ranking" {
+function loadSortBy(): SortBy {
   try {
     const raw = localStorage.getItem(PREF_SORT_BY_KEY);
     return raw === "date" || raw === "name" || raw === "ranking" ? raw : "date";
@@ -866,7 +875,7 @@ export default function App() {
 
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<"date" | "name" | "ranking">(loadSortBy);
+  const [sortBy, setSortBy] = useState<SortBy>(loadSortBy);
   const [rankOrder, setRankOrder] = useState<string[]>(loadRankOrder);
   const rankOrderHydratedRef = useRef(false);
   const [modal, setModal] = useState<ModalState>({ mode: "closed" });
@@ -895,7 +904,13 @@ export default function App() {
   const [customAppUrl, setCustomAppUrl] = useState("");
   const [customAppIconUrl, setCustomAppIconUrl] = useState("");
   const [addingCustomApp, setAddingCustomApp] = useState(false);
-  const [appsEditMode, setAppsEditMode] = useState(false);
+  const [appEditor, setAppEditor] = useState<AppEditorState | null>(null);
+  const [appEditorName, setAppEditorName] = useState("");
+  const [appEditorUrl, setAppEditorUrl] = useState("");
+  const [appEditorIconUrl, setAppEditorIconUrl] = useState("");
+  const [appEditorError, setAppEditorError] = useState<string | null>(null);
+  const [appContextMenu, setAppContextMenu] = useState<{ x: number; y: number; appId: string } | null>(null);
+  const appContextMenuRef = useRef<HTMLDivElement>(null);
   const [appDraggingId, setAppDraggingId] = useState<string | null>(null);
   const [appDragReadyId, setAppDragReadyId] = useState<string | null>(null);
   const appDragHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -903,7 +918,6 @@ export default function App() {
 
   // When opened via extension toolbar click or context menu, URL params carry
   // the originating tab's info — auto-open the add modal with it prefilled.
-  const [incomingTab, setIncomingTab] = useState<{ url: string; title: string; favicon: string } | null>(null);
   const effectiveSelectedTag =
     selectedTag === NOT_TAGGED_FILTER || selectedTag === NOT_REACHABLE_FILTER
       ? null
@@ -924,7 +938,6 @@ export default function App() {
       favicon: params.get("favicon") ?? "",
     };
     queueMicrotask(() => {
-      setIncomingTab(tab);
       setModal({ mode: "add", prefill: tab });
     });
     // Clean the URL so a refresh doesn't re-trigger
@@ -941,6 +954,31 @@ export default function App() {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [showDataMenu]);
+
+  useEffect(() => {
+    if (!appContextMenu) return;
+    const closeOnOutsideClick = (e: MouseEvent) => {
+      if (!appContextMenuRef.current) return;
+      if (!appContextMenuRef.current.contains(e.target as Node)) {
+        setAppContextMenu(null);
+      }
+    };
+    const closeOnEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAppContextMenu(null);
+    };
+    const closeOnResize = () => setAppContextMenu(null);
+    const closeOnScroll = () => setAppContextMenu(null);
+    window.addEventListener("click", closeOnOutsideClick);
+    window.addEventListener("resize", closeOnResize);
+    window.addEventListener("scroll", closeOnScroll, true);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("click", closeOnOutsideClick);
+      window.removeEventListener("resize", closeOnResize);
+      window.removeEventListener("scroll", closeOnScroll, true);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [appContextMenu]);
 
   useEffect(() => {
     return () => {
@@ -1053,8 +1091,24 @@ export default function App() {
     : 0;
 
   const handleSave = (data: Omit<Bookmark, "id" | "addedAt">) => {
-    if (modal.mode === "add") addBookmark(data);
-    else if (modal.mode === "edit") updateBookmark(modal.bookmark.id, data);
+    if (modal.mode === "add") {
+      const incomingKey = normaliseUrlForDedupe(data.url);
+      const existing = bookmarks.find((b) => normaliseUrlForDedupe(b.url) === incomingKey);
+      if (existing) {
+        const confirmed = window.confirm(
+          `A bookmark for this link already exists.\n\nTitle: ${existing.title}\nURL: ${existing.url}\n\nConfirm = overwrite existing bookmark\nCancel = keep existing bookmark`
+        );
+        if (!confirmed) return;
+        updateBookmark(existing.id, {
+          ...data,
+          ranking: data.ranking ?? existing.ranking,
+        });
+      } else {
+        addBookmark(data);
+      }
+    } else if (modal.mode === "edit") {
+      updateBookmark(modal.bookmark.id, data);
+    }
     setModal({ mode: "closed" });
   };
 
@@ -1118,8 +1172,47 @@ export default function App() {
         };
       }));
       const valid = items.filter((x): x is NonNullable<typeof x> => x !== null);
-      importBookmarks(valid);
-      setDropResult(`Imported ${valid.length} bookmark${valid.length !== 1 ? "s" : ""}`);
+      const byKey = new Map(bookmarks.map((b) => [normaliseUrlForDedupe(b.url), b] as const));
+      const toImport: Omit<Bookmark, "id">[] = [];
+      let overwritten = 0;
+
+      for (const item of valid) {
+        const key = normaliseUrlForDedupe(item.url);
+        const existing = byKey.get(key);
+        if (!existing) {
+          toImport.push(item);
+          continue;
+        }
+
+        const confirmed = window.confirm(
+          `A bookmark for this link already exists.\n\nTitle: ${existing.title}\nURL: ${existing.url}\n\nConfirm = overwrite existing bookmark\nCancel = skip this dropped bookmark`
+        );
+        if (!confirmed) continue;
+
+        updateBookmark(existing.id, {
+          title: item.title,
+          url: item.url,
+          favicon: item.favicon,
+          description: item.description,
+          tags: item.tags,
+          ranking: existing.ranking,
+        });
+        overwritten += 1;
+      }
+
+      if (toImport.length > 0) {
+        importBookmarks(toImport);
+      }
+
+      const imported = toImport.length;
+      if (imported > 0 || overwritten > 0) {
+        const parts = [];
+        if (imported > 0) parts.push(`Imported ${imported}`);
+        if (overwritten > 0) parts.push(`overwrote ${overwritten}`);
+        setDropResult(`${parts.join(" and ")} bookmark${imported + overwritten === 1 ? "" : "s"}`);
+      } else {
+        setDropResult("No bookmarks imported.");
+      }
       setTimeout(() => setDropResult(null), 3000);
     } finally {
       setDropLoading(false);
@@ -1325,6 +1418,36 @@ export default function App() {
     setTagOrder(next);
   };
 
+  const handleRenameSidebarTag = (oldName: string, newName: string) => {
+    const normalized = normalizeTagName(newName);
+
+    if (normalized && normalized !== oldName) {
+      setTagOrder((prev) => {
+        const hasOld = prev.includes(oldName);
+        const hasNew = prev.includes(normalized);
+
+        if (hasOld) {
+          if (hasNew) {
+            return prev.filter((t) => t !== oldName);
+          }
+          return prev.map((t) => (t === oldName ? normalized : t));
+        }
+
+        // Keep renamed tags in the same visual sidebar position even when
+        // they were not previously pinned in tagOrder.
+        const visual = [...orderedSidebarTags];
+        const from = visual.indexOf(oldName);
+        if (from < 0) return prev;
+        const without = visual.filter((t) => t !== oldName && t !== normalized);
+        const insertAt = Math.max(0, Math.min(from, without.length));
+        without.splice(insertAt, 0, normalized);
+        return without;
+      });
+    }
+
+    renameTag(oldName, newName);
+  };
+
   const addAppShortcut = (app: AppShortcut) => {
     setAppShortcuts((prev) => {
       const appKey = normaliseUrlForDedupe(app.url);
@@ -1421,6 +1544,95 @@ export default function App() {
     setAppShortcuts((prev) => prev.filter((x) => x.id !== app.id));
   };
 
+  const openEditAppDialog = (app: AppShortcut) => {
+    setAppEditor({ mode: "edit", appId: app.id });
+    setAppEditorName(app.name);
+    setAppEditorUrl(app.url);
+    setAppEditorIconUrl("");
+    setAppEditorError(null);
+  };
+
+  const openChangeIconDialog = (app: AppShortcut) => {
+    setAppEditor({ mode: "icon", appId: app.id });
+    setAppEditorName("");
+    setAppEditorUrl("");
+    setAppEditorIconUrl(app.iconUrl ?? app.icon ?? "");
+    setAppEditorError(null);
+  };
+
+  const closeAppEditorDialog = () => {
+    setAppEditor(null);
+    setAppEditorError(null);
+  };
+
+  const saveAppEditorDialog = () => {
+    if (!appEditor) return;
+    const app = appShortcuts.find((x) => x.id === appEditor.appId);
+    if (!app) {
+      closeAppEditorDialog();
+      return;
+    }
+
+    if (appEditor.mode === "edit") {
+      const nextName = appEditorName.trim();
+      if (!nextName) {
+        setAppEditorError("Name is required.");
+        return;
+      }
+
+      const normalized = ensureUrlProtocol(appEditorUrl.trim());
+      if (!normalized) {
+        setAppEditorError("URL is required.");
+        return;
+      }
+
+      let nextUrl = "";
+      try {
+        nextUrl = new URL(normalized).toString();
+      } catch {
+        setAppEditorError("Please enter a valid URL.");
+        return;
+      }
+
+      const duplicate = appShortcuts.find(
+        (x) => x.id !== app.id && normaliseUrlForDedupe(x.url) === normaliseUrlForDedupe(nextUrl)
+      );
+      if (duplicate) {
+        setAppEditorError(`Another app already uses this URL: ${duplicate.name}`);
+        return;
+      }
+
+      setAppShortcuts((prev) =>
+        prev.map((x) => {
+          if (x.id !== app.id) return x;
+          const keepCurrentIcon = !!x.iconUrl;
+          return {
+            ...x,
+            name: nextName,
+            url: nextUrl,
+            icon: keepCurrentIcon ? x.icon : faviconFromUrl(nextUrl),
+          };
+        })
+      );
+      closeAppEditorDialog();
+      return;
+    }
+
+    const nextIcon = sanitizeLegacyIconUrl(appEditorIconUrl.trim());
+    if (!nextIcon) {
+      setAppEditorError("Icon URL is required.");
+      return;
+    }
+
+    setAppShortcuts((prev) =>
+      prev.map((x) => {
+        if (x.id !== app.id) return x;
+        return { ...x, iconUrl: nextIcon, icon: nextIcon };
+      })
+    );
+    closeAppEditorDialog();
+  };
+
   const getDraggedAppId = (e: React.DragEvent): string => {
     const directId = e.dataTransfer.getData(APP_SHORTCUT_DRAG_MIME);
     const plain = e.dataTransfer.getData("text/plain");
@@ -1431,7 +1643,6 @@ export default function App() {
   };
 
   const handleAppShortcutDragStart = (appId: string, e: React.DragEvent) => {
-    if (appsEditMode) return;
     if (appDragHoverTimerRef.current) {
       clearTimeout(appDragHoverTimerRef.current);
       appDragHoverTimerRef.current = null;
@@ -1461,7 +1672,6 @@ export default function App() {
   };
 
   const handleAppShortcutMouseEnter = (appId: string) => {
-    if (appsEditMode) return;
     if (appDragHoverTimerRef.current) {
       clearTimeout(appDragHoverTimerRef.current);
     }
@@ -1542,7 +1752,19 @@ export default function App() {
           if (prefs.displayMode === "grid" || prefs.displayMode === "list" || prefs.displayMode === "preview") setDisplayMode(prefs.displayMode);
           if (typeof prefs.groupByDate === "boolean") setGroupByDate(prefs.groupByDate);
           if (prefs.sortBy === "date" || prefs.sortBy === "name" || prefs.sortBy === "ranking") setSortBy(prefs.sortBy);
-          if (Array.isArray(prefs.rankOrder)) setRankOrder(prefs.rankOrder.filter((id): id is string => typeof id === "string"));
+          if (Array.isArray(prefs.rankOrder)) {
+            setRankOrder(prefs.rankOrder.filter((id): id is string => typeof id === "string"));
+          } else {
+            // Fallback for older backups: derive ranking order from bookmark.ranking.
+            const fallbackRankOrder = (payload.bookmarks ?? [])
+              .filter((b) => typeof b.ranking === "number")
+              .sort((a, b) => (b.ranking ?? 0) - (a.ranking ?? 0))
+              .map((b) => b.id)
+              .filter((id): id is string => typeof id === "string");
+            if (fallbackRankOrder.length > 0) {
+              setRankOrder(fallbackRankOrder);
+            }
+          }
           if (typeof prefs.zoom === "number" && Number.isFinite(prefs.zoom)) setZoom(Math.max(1, Math.min(5, prefs.zoom)));
           if (Array.isArray(prefs.tagOrder)) setTagOrder(prefs.tagOrder.filter((t): t is string => typeof t === "string"));
           if (typeof prefs.sidebarOpen === "boolean") setSidebarOpen(prefs.sidebarOpen);
@@ -1709,24 +1931,6 @@ export default function App() {
                 Apps
               </span>
               <button
-                onClick={() => {
-                  if (appDragHoverTimerRef.current) {
-                    clearTimeout(appDragHoverTimerRef.current);
-                    appDragHoverTimerRef.current = null;
-                  }
-                  setAppDragReadyId(null);
-                  setAppsEditMode((v) => !v);
-                }}
-                title="Toggle app remove mode"
-                style={{
-                  background: appsEditMode ? "var(--border)" : "none", border: "1px solid var(--border-hover)", borderRadius: 5,
-                  color: "var(--text-3)", fontSize: 11, fontWeight: 600, cursor: "pointer",
-                  padding: "2px 6px", lineHeight: 1.4, marginRight: 4,
-                }}
-              >
-                {appsEditMode ? "Done" : "Edit"}
-              </button>
-              <button
                 onClick={() => { setShowAppPicker(true); setAppPickerError(null); }}
                 title="Add app shortcut"
                 style={{
@@ -1779,7 +1983,7 @@ export default function App() {
                     }}
                   >
                     <button
-                      draggable={!appsEditMode}
+                      draggable
                       onDragStart={(e) => handleAppShortcutDragStart(app.id, e)}
                       onDragEnd={() => {
                         setAppDraggingId(null);
@@ -1788,10 +1992,10 @@ export default function App() {
                       onMouseEnter={() => handleAppShortcutMouseEnter(app.id)}
                       onMouseLeave={() => handleAppShortcutMouseLeave(app.id)}
                       title={`${app.name} — ${app.url}`}
-                      onClick={() => { if (!appsEditMode) handleOpenAppShortcut(app); }}
+                      onClick={() => { handleOpenAppShortcut(app); }}
                       onContextMenu={(e) => {
                         e.preventDefault();
-                        handleRemoveAppShortcut(app);
+                        setAppContextMenu({ x: e.clientX, y: e.clientY, appId: app.id });
                       }}
                       style={{
                         width: 24,
@@ -1802,33 +2006,76 @@ export default function App() {
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        cursor: appsEditMode ? "default" : (appDragReadyId === app.id ? "grab" : "default"),
+                        cursor: appDragReadyId === app.id ? "grab" : "default",
                         padding: 0,
                         opacity: appDraggingId === app.id ? 0.6 : 1,
                       }}
                     >
                       <AppIcon app={app} width={24} height={24} radius={4} />
                     </button>
-                    {appsEditMode && (
-                      <button
-                        title={`Remove ${app.name}`}
-                        onClick={() => handleRemoveAppShortcut(app)}
-                        style={{
-                          position: "absolute", top: -7, right: -7,
-                          width: 14, height: 14, borderRadius: 99,
-                          border: "1px solid #ef4444", background: "#ef4444",
-                          color: "#fff", fontSize: 10, lineHeight: "10px",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          cursor: "pointer", padding: 0,
-                        }}
-                      >
-                        ×
-                      </button>
-                    )}
                   </div>
                 );
               })}
             </div>
+            {appContextMenu && (() => {
+              const app = appShortcuts.find((a) => a.id === appContextMenu.appId);
+              if (!app) return null;
+              return (
+                <div
+                  ref={appContextMenuRef}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: "fixed",
+                    left: appContextMenu.x,
+                    top: appContextMenu.y,
+                    minWidth: 154,
+                    background: "var(--card)",
+                    border: "1px solid var(--border-hover)",
+                    borderRadius: 8,
+                    boxShadow: "0 10px 26px rgba(0,0,0,0.45)",
+                    padding: 4,
+                    zIndex: 3000,
+                  }}
+                >
+                  <button
+                    onClick={() => {
+                      openEditAppDialog(app);
+                      setAppContextMenu(null);
+                    }}
+                    style={appContextMenuBtn}
+                  >
+                    Edit App
+                  </button>
+                  <button
+                    onClick={() => {
+                      openChangeIconDialog(app);
+                      setAppContextMenu(null);
+                    }}
+                    style={appContextMenuBtn}
+                  >
+                    Change App Icon
+                  </button>
+                  <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+                  <button
+                    onClick={() => {
+                      handleRemoveAppShortcut(app);
+                      setAppContextMenu(null);
+                    }}
+                    style={appContextMenuBtn}
+                  >
+                    Delete App
+                  </button>
+                </div>
+              );
+            })()}
+
+            <div
+              style={{
+                height: 1,
+                margin: "2px 12px 12px",
+                background: "var(--border)",
+              }}
+            />
 
             <div style={{ padding: "0 8px 14px 16px", display: "flex", alignItems: "center" }}>
                 <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", letterSpacing: "0.07em", textTransform: "uppercase", flex: 1 }}>
@@ -1894,7 +2141,7 @@ export default function App() {
                   count={count}
                   active={selectedTag === tag}
                   onSelect={() => setSelectedTag(selectedTag === tag ? null : tag)}
-                  onRename={(newName) => renameTag(tag, newName)}
+                  onRename={(newName) => handleRenameSidebarTag(tag, newName)}
                   onDelete={() => setPendingTagDelete(tag)}
                   onClear={() => clearTag(tag)}
                   onChangeColor={() => {
@@ -2130,28 +2377,6 @@ export default function App() {
 
             <Divider />
 
-            {incomingTab && (
-              <button
-                onClick={() => setModal({ mode: "add", prefill: incomingTab })}
-                title={`Save: ${incomingTab.url}`}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  padding: "6px 12px", background: "#16a34a", border: "none",
-                  borderRadius: 7, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer",
-                  maxWidth: 200, overflow: "hidden",
-                }}
-              >
-                {incomingTab.favicon && (
-                  <img src={incomingTab.favicon} width={14} height={14}
-                    style={{ borderRadius: 2, flexShrink: 0 }}
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                  />
-                )}
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {t("saveTab")}
-                </span>
-              </button>
-            )}
             <button onClick={() => setModal({ mode: "add" })} style={{
               display: "flex", alignItems: "center", gap: 5,
               padding: "6px 12px", background: "#3b82f6", border: "none",
@@ -2297,6 +2522,22 @@ export default function App() {
             selectedTag={effectiveSelectedTag}
             allTags={allTags}
             section="import"
+            backupPayload={{
+              version: 2,
+              customTags,
+              preferences: {
+                theme,
+                displayMode,
+                groupByDate,
+                sortBy,
+                rankOrder,
+                zoom,
+                tagOrder,
+                sidebarOpen,
+                appShortcuts,
+                appCatalog,
+              },
+            }}
           />
         )}
 
@@ -2308,8 +2549,135 @@ export default function App() {
             selectedTag={effectiveSelectedTag}
             allTags={allTags}
             section="export"
+            backupPayload={{
+              version: 2,
+              customTags,
+              preferences: {
+                theme,
+                displayMode,
+                groupByDate,
+                sortBy,
+                rankOrder,
+                zoom,
+                tagOrder,
+                sidebarOpen,
+                appShortcuts,
+                appCatalog,
+              },
+            }}
           />
         )}
+
+        {appEditor && (() => {
+          const app = appShortcuts.find((x) => x.id === appEditor.appId);
+          if (!app) return null;
+          return (
+            <div
+              onClick={closeAppEditorDialog}
+              style={{
+                position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)",
+                backdropFilter: "blur(4px)", display: "flex",
+                alignItems: "center", justifyContent: "center", zIndex: 1000,
+              }}
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  background: "var(--card)", border: "1px solid var(--border-hover)",
+                  borderRadius: 14, padding: 22, width: 520, maxWidth: "calc(100vw - 32px)",
+                  display: "flex", flexDirection: "column", gap: 12,
+                  boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", margin: 0 }}>
+                    {appEditor.mode === "edit" ? "Edit App" : "Change App Icon"}
+                  </h2>
+                  <button
+                    onClick={closeAppEditorDialog}
+                    style={{
+                      width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border-hover)",
+                      background: "var(--card)", color: "var(--text-3)", cursor: "pointer",
+                      fontSize: 15,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+
+                {appEditor.mode === "edit" ? (
+                  <>
+                    <input
+                      type="text"
+                      value={appEditorName}
+                      onChange={(e) => {
+                        setAppEditorName(e.target.value);
+                        if (appEditorError) setAppEditorError(null);
+                      }}
+                      placeholder="App name"
+                      style={{
+                        background: "var(--bg)", border: "1px solid var(--border-hover)",
+                        borderRadius: 7, padding: "8px 10px", color: "var(--text)", fontSize: 13, outline: "none",
+                      }}
+                    />
+                    <input
+                      type="text"
+                      value={appEditorUrl}
+                      onChange={(e) => {
+                        setAppEditorUrl(e.target.value);
+                        if (appEditorError) setAppEditorError(null);
+                      }}
+                      placeholder="https://example.com"
+                      style={{
+                        background: "var(--bg)", border: "1px solid var(--border-hover)",
+                        borderRadius: 7, padding: "8px 10px", color: "var(--text)", fontSize: 13, outline: "none",
+                      }}
+                    />
+                  </>
+                ) : (
+                  <input
+                    type="text"
+                    value={appEditorIconUrl}
+                    onChange={(e) => {
+                      setAppEditorIconUrl(e.target.value);
+                      if (appEditorError) setAppEditorError(null);
+                    }}
+                    placeholder="https://example.com/icon.png"
+                    style={{
+                      background: "var(--bg)", border: "1px solid var(--border-hover)",
+                      borderRadius: 7, padding: "8px 10px", color: "var(--text)", fontSize: 13, outline: "none",
+                    }}
+                  />
+                )}
+
+                {appEditorError && (
+                  <span style={{ fontSize: 12, color: "#ef4444" }}>{appEditorError}</span>
+                )}
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  <button
+                    onClick={closeAppEditorDialog}
+                    style={{
+                      height: 34, padding: "0 14px", borderRadius: 8, border: "1px solid var(--border-hover)",
+                      background: "var(--card)", color: "var(--text-2)", cursor: "pointer", fontSize: 13, fontWeight: 600,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={saveAppEditorDialog}
+                    style={{
+                      height: 34, padding: "0 14px", borderRadius: 8, border: "1px solid #3b82f6",
+                      background: "#3b82f6", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 700,
+                    }}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
                         {showAppPicker && (
           <div
@@ -2660,13 +3028,18 @@ function TagChip({ label, count, active, color, onClick, vertical = false }: {
   label: string; count: number; active: boolean; color?: string; onClick: () => void; vertical?: boolean;
 }) {
   const c = color ?? "var(--text-2)";
+  const [hovered, setHovered] = useState(false);
   return (
-    <button onClick={onClick} style={{
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
       display: "flex", alignItems: "center", gap: 8,
       padding: vertical ? "6px 12px" : "4px 10px",
       borderRadius: vertical ? 6 : 99,
       border: "none", cursor: "pointer",
-      background: active ? (color ? color + "22" : "var(--border)") : "transparent",
+      background: active || hovered ? (color ? color + "22" : "var(--border)") : "transparent",
       color: active ? (color ?? "var(--text)") : "var(--text-2)",
       fontSize: 13, fontWeight: active ? 600 : 400,
       whiteSpace: "nowrap", flexShrink: vertical ? undefined : 0,
@@ -2674,7 +3047,8 @@ function TagChip({ label, count, active, color, onClick, vertical = false }: {
       margin: vertical ? "1px 8px" : undefined,
       textAlign: "left",
       transition: "background 0.1s, color 0.1s",
-    }}>
+    }}
+    >
       {color
         ? <span style={{ width: 8, height: 8, borderRadius: "50%", background: c, display: "inline-block", flexShrink: 0 }} />
         : <span style={{ fontSize: 13 }}>◈</span>
@@ -2697,16 +3071,38 @@ function AppIcon({ app, width, height, radius }: { app: Pick<AppShortcut, "url" 
   const src = sources[Math.min(idx, Math.max(0, sources.length - 1))] || faviconFromUrl(app.url);
 
   return (
-    <img
-      src={src}
-      alt=""
-      width={width}
-      height={height}
-      style={{ width, height, objectFit: "contain", borderRadius: radius, background: "#fff", flexShrink: 0 }}
-      onError={() => {
-        setIdx((i) => Math.min(i + 1, sources.length - 1));
+    <span
+      style={{
+        width,
+        height,
+        borderRadius: radius,
+        background: "#fff",
+        flexShrink: 0,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        overflow: "hidden",
       }}
-    />
+    >
+      <img
+        src={src}
+        alt=""
+        width={width}
+        height={height}
+        style={{
+          width: "100%",
+          height: "100%",
+          display: "block",
+          objectFit: "contain",
+          objectPosition: "center",
+          maxWidth: "100%",
+          maxHeight: "100%",
+        }}
+        onError={() => {
+          setIdx((i) => Math.min(i + 1, sources.length - 1));
+        }}
+      />
+    </span>
   );
 }
 
@@ -3011,7 +3407,7 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onCle
       style={{
         display: "flex", alignItems: "center",
         width: "calc(100% - 16px)", margin: "1px 8px", borderRadius: 6,
-        background: dragOver ? c + "33" : active ? c + "22" : "transparent",
+        background: dragOver ? c + "33" : (active || hovered) ? c + "22" : "transparent",
         transition: "background 0.1s",
       }}
     >
@@ -3028,27 +3424,8 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onCle
       >
         <span style={{ width: 8, height: 8, borderRadius: "50%", background: c, flexShrink: 0, display: "inline-block" }} />
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{tag}</span>
-        {!hovered && <span style={{ fontSize: 11, color: "var(--text-4)", flexShrink: 0 }}>{count}</span>}
+        <span style={{ fontSize: 11, color: "var(--text-4)", flexShrink: 0 }}>{count}</span>
       </button>
-
-      {hovered && (
-        <div style={{ display: "flex", gap: 2, paddingRight: 4, flexShrink: 0 }}>
-          <button
-            onClick={(e) => { e.stopPropagation(); setEditing(true); }}
-            title="Rename tag"
-            style={tagActionBtn}
-          >
-            ✏
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            title="Delete tag from all bookmarks"
-            style={tagActionBtn}
-          >
-            ×
-          </button>
-        </div>
-      )}
 
       {contextMenu && (
         <div
@@ -3069,15 +3446,6 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onCle
         >
           <button
             onClick={() => {
-              onClear();
-              setContextMenu(null);
-            }}
-            style={tagContextMenuBtn}
-          >
-            Clear Tag
-          </button>
-          <button
-            onClick={() => {
               onChangeColor();
               setContextMenu(null);
             }}
@@ -3085,20 +3453,54 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onCle
           >
             Change Color
           </button>
+          <button
+            onClick={() => {
+              setEditing(true);
+              setContextMenu(null);
+            }}
+            style={tagContextMenuBtn}
+          >
+            Rename Tag
+          </button>
+          <button
+            onClick={() => {
+              onClear();
+              setContextMenu(null);
+            }}
+            style={tagContextMenuBtn}
+          >
+            Clear Tag
+          </button>
+          <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+          <button
+            onClick={() => {
+              onDelete();
+              setContextMenu(null);
+            }}
+            style={tagContextMenuBtn}
+          >
+            Delete Tag
+          </button>
         </div>
       )}
     </div>
   );
 }
 
-const tagActionBtn: React.CSSProperties = {
-  display: "flex", alignItems: "center", justifyContent: "center",
-  width: 22, height: 22, borderRadius: 5, border: "none",
-  background: "var(--border-hover)", color: "var(--text-3)",
-  cursor: "pointer", fontSize: 12, flexShrink: 0,
+const tagContextMenuBtn: React.CSSProperties = {
+  display: "block",
+  width: "100%",
+  textAlign: "left",
+  padding: "7px 10px",
+  border: "none",
+  borderRadius: 6,
+  background: "none",
+  color: "var(--text-2)",
+  fontSize: 13,
+  cursor: "pointer",
 };
 
-const tagContextMenuBtn: React.CSSProperties = {
+const appContextMenuBtn: React.CSSProperties = {
   display: "block",
   width: "100%",
   textAlign: "left",
