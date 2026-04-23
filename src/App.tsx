@@ -701,6 +701,7 @@ type BackupPreferences = {
   displayMode?: DisplayMode;
   groupByDate?: boolean;
   sortBy?: "date" | "name" | "ranking";
+  rankOrder?: string[];
   zoom?: number;
   tagOrder?: string[];
   sidebarOpen?: boolean;
@@ -719,6 +720,7 @@ const PREF_THEME_KEY = "ui_theme_v1";
 const PREF_DISPLAY_MODE_KEY = "ui_display_mode_v1";
 const PREF_GROUP_BY_DATE_KEY = "ui_group_by_date_v1";
 const PREF_SORT_BY_KEY = "ui_sort_by_v1";
+const PREF_RANK_ORDER_KEY = "ui_rank_order_v1";
 const PREF_ZOOM_KEY = "ui_zoom_v1";
 const THEME_CYCLE = ["white", "gray", "red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "brown", "white-mid", "gray-mid", "red-mid", "orange-mid", "yellow-mid", "green-mid", "cyan-mid", "blue-mid", "purple-mid", "pink-mid", "brown-mid", "black", "white-night", "gray-night", "red-night", "orange-night", "yellow-night", "green-night", "cyan-night", "blue-night", "purple-night", "pink-night", "brown-night", "dark", "midnight", "ocean", "dusk", "slate-night", "sapphire-night", "indigo-deep", "teal-night", "graphite", "high-contrast"] as const;
 type ThemeId = typeof THEME_CYCLE[number];
@@ -830,6 +832,17 @@ function loadZoom(): number {
   }
 }
 
+function loadRankOrder(): string[] {
+  try {
+    const raw = localStorage.getItem(PREF_RANK_ORDER_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 function loadTagOrder(): string[] {
   try {
     const raw = localStorage.getItem(TAG_ORDER_KEY);
@@ -854,6 +867,8 @@ export default function App() {
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<"date" | "name" | "ranking">(loadSortBy);
+  const [rankOrder, setRankOrder] = useState<string[]>(loadRankOrder);
+  const rankOrderHydratedRef = useRef(false);
   const [modal, setModal] = useState<ModalState>({ mode: "closed" });
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -952,6 +967,10 @@ export default function App() {
   }, [sortBy]);
 
   useEffect(() => {
+    localStorage.setItem(PREF_RANK_ORDER_KEY, JSON.stringify(rankOrder));
+  }, [rankOrder]);
+
+  useEffect(() => {
     localStorage.setItem(PREF_ZOOM_KEY, String(zoom));
   }, [zoom]);
 
@@ -966,6 +985,27 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(APP_CATALOG_KEY, JSON.stringify(appCatalog));
   }, [appCatalog]);
+
+  useEffect(() => {
+    if (rankOrderHydratedRef.current) return;
+    rankOrderHydratedRef.current = true;
+    if (rankOrder.length > 0) return;
+
+    const rankedIds = [...bookmarks]
+      .filter((b) => typeof b.ranking === "number")
+      .sort((a, b) => (b.ranking ?? 0) - (a.ranking ?? 0))
+      .map((b) => b.id);
+    if (rankedIds.length > 0) setRankOrder(rankedIds);
+  }, [bookmarks, rankOrder]);
+
+  useEffect(() => {
+    const bookmarkIds = bookmarks.map((b) => b.id);
+    const bookmarkSet = new Set(bookmarkIds);
+    setRankOrder((prev) => {
+      const next = prev.filter((id) => bookmarkSet.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [bookmarks]);
 
   const filtered = useMemo(() => {
     const tokens = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -991,10 +1031,20 @@ export default function App() {
   const sorted = useMemo(() => {
     const arr = [...filtered];
     if (sortBy === "name") arr.sort((a, b) => a.title.localeCompare(b.title));
-    else if (sortBy === "ranking") arr.sort((a, b) => (b.ranking ?? 0) - (a.ranking ?? 0));
+    else if (sortBy === "ranking") {
+      const rankIdx = new Map(rankOrder.map((id, idx) => [id, idx]));
+      arr.sort((a, b) => {
+        const ai = rankIdx.get(a.id);
+        const bi = rankIdx.get(b.id);
+        if (ai !== undefined && bi !== undefined) return ai - bi;
+        if (ai !== undefined) return -1;
+        if (bi !== undefined) return 1;
+        return 0;
+      });
+    }
     else arr.sort((a, b) => b.addedAt.localeCompare(a.addedAt));
     return arr;
-  }, [filtered, sortBy]);
+  }, [filtered, sortBy, rankOrder]);
 
   // Date grouping only makes sense when sorted by date
   const effectiveGroupByDate = groupByDate && sortBy === "date";
@@ -1224,6 +1274,11 @@ export default function App() {
   };
 
   const handleReorderBookmark = (draggedId: string, targetId: string) => {
+    if (sortBy !== "ranking") {
+      setDropResult("Switch to Ranking sort to reorder tiles.");
+      setTimeout(() => setDropResult(null), 1800);
+      return;
+    }
     if (draggedId === targetId) return;
     const visualOrder = sorted.map((b) => b.id);
     const from = visualOrder.indexOf(draggedId);
@@ -1234,17 +1289,25 @@ export default function App() {
     nextVisible.splice(from, 1);
     nextVisible.splice(to, 0, draggedId);
 
-    const hiddenIds = bookmarks
-      .map((b) => b.id)
-      .filter((id) => !nextVisible.includes(id));
-    const finalOrder = [...nextVisible, ...hiddenIds];
-    const total = finalOrder.length;
-    const rankingMap = new Map(finalOrder.map((id, idx) => [id, total - idx]));
+    const bookmarkIds = new Set(bookmarks.map((b) => b.id));
+    const ranked = rankOrder.filter((id) => bookmarkIds.has(id));
+    const placeAfter = from < to;
+    const nextRanked = [...ranked];
+    if (!nextRanked.includes(targetId)) nextRanked.push(targetId);
+    const existingDraggedIdx = nextRanked.indexOf(draggedId);
+    if (existingDraggedIdx >= 0) nextRanked.splice(existingDraggedIdx, 1);
+    const targetIdx = nextRanked.indexOf(targetId);
+    const insertIdx = Math.max(0, Math.min(nextRanked.length, targetIdx + (placeAfter ? 1 : 0)));
+    nextRanked.splice(insertIdx, 0, draggedId);
+    setRankOrder(nextRanked);
+
+    const total = nextRanked.length;
+    const rankingMap = new Map(nextRanked.map((id, idx) => [id, total - idx]));
 
     replaceBookmarks(
       bookmarks.map((b) => ({
         ...b,
-        ranking: rankingMap.get(b.id) ?? b.ranking ?? 0,
+        ranking: rankingMap.get(b.id),
       }))
     );
     setSortBy("ranking");
@@ -1427,6 +1490,7 @@ export default function App() {
         displayMode,
         groupByDate,
         sortBy,
+        rankOrder,
         zoom,
         tagOrder,
         sidebarOpen,
@@ -1478,6 +1542,7 @@ export default function App() {
           if (prefs.displayMode === "grid" || prefs.displayMode === "list" || prefs.displayMode === "preview") setDisplayMode(prefs.displayMode);
           if (typeof prefs.groupByDate === "boolean") setGroupByDate(prefs.groupByDate);
           if (prefs.sortBy === "date" || prefs.sortBy === "name" || prefs.sortBy === "ranking") setSortBy(prefs.sortBy);
+          if (Array.isArray(prefs.rankOrder)) setRankOrder(prefs.rankOrder.filter((id): id is string => typeof id === "string"));
           if (typeof prefs.zoom === "number" && Number.isFinite(prefs.zoom)) setZoom(Math.max(1, Math.min(5, prefs.zoom)));
           if (Array.isArray(prefs.tagOrder)) setTagOrder(prefs.tagOrder.filter((t): t is string => typeof t === "string"));
           if (typeof prefs.sidebarOpen === "boolean") setSidebarOpen(prefs.sidebarOpen);

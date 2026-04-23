@@ -135,6 +135,7 @@ function isHostnameLikeTitle(title: string, url: string): boolean {
 
 export function useBookmarks() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(load);
+  const [bookmarksDirty, setBookmarksDirty] = useState(false);
   const [customTags, setCustomTags] = useState<string[]>(loadCustomTags);
   // Tracks IDs already queued for enrichment so we never fetch the same bookmark twice
   const enrichedIds = useRef(new Set<string>());
@@ -142,8 +143,27 @@ export function useBookmarks() {
   const commit = useCallback((next: Bookmark[]) => {
     const normalized = normaliseBookmarks(next);
     setBookmarks(normalized);
-    save(normalized);
+    setBookmarksDirty(true);
   }, []);
+
+  const commitFromUpdater = useCallback((updater: (prev: Bookmark[]) => Bookmark[]) => {
+    setBookmarks((prev) => {
+      const next = updater(prev);
+      if (next === prev) return prev;
+      return normaliseBookmarks(next);
+    });
+    setBookmarksDirty(true);
+  }, []);
+
+  // Memory is authoritative. Persist to storage in a separate flush step.
+  useEffect(() => {
+    if (!bookmarksDirty) return;
+    const flushTimer = window.setTimeout(() => {
+      save(bookmarks);
+      setBookmarksDirty(false);
+    }, 120);
+    return () => window.clearTimeout(flushTimer);
+  }, [bookmarks, bookmarksDirty]);
 
   // Background enrichment: whenever bookmarks change, find any without a description
   // that haven't been queued yet and fetch their metadata.
@@ -165,64 +185,77 @@ export function useBookmarks() {
     (async () => {
       for (const bookmark of missing) {
         const meta = await fetchMeta(bookmark.url);
-        const shouldRefreshYoutube = isYoutubeUrl(bookmark.url) && (
-          isGenericYoutubeTitle(bookmark.title) || isGenericYoutubeDescription(bookmark.description)
-        );
-        const shouldRefreshGenericTitle = isHostnameLikeTitle(bookmark.title, bookmark.url);
         const nextTitle = meta.title?.trim();
         const nextDescription = meta.description?.trim();
         if (!nextTitle && !nextDescription && !meta.favicon) continue;
 
-        const current = load();
-        const updated = current.map((b) =>
-          b.id === bookmark.id
-            ? {
-                ...b,
-                title: (shouldRefreshYoutube || shouldRefreshGenericTitle) && nextTitle ? nextTitle : b.title,
-                description: nextDescription || b.description,
-                favicon: meta.favicon || b.favicon,
-              }
-            : b
-        );
-        save(updated);
-        setBookmarks([...updated]);
+        commitFromUpdater((prev) => {
+          let changed = false;
+          const updated = prev.map((b) => {
+            if (b.id !== bookmark.id) return b;
+
+            const shouldRefreshYoutube = isYoutubeUrl(b.url) && (
+              isGenericYoutubeTitle(b.title) || isGenericYoutubeDescription(b.description)
+            );
+            const shouldRefreshGenericTitle = isHostnameLikeTitle(b.title, b.url);
+
+            const merged = {
+              ...b,
+              title: (shouldRefreshYoutube || shouldRefreshGenericTitle) && nextTitle ? nextTitle : b.title,
+              description: nextDescription || b.description,
+              favicon: meta.favicon || b.favicon,
+            };
+
+            if (
+              merged.title !== b.title ||
+              merged.description !== b.description ||
+              merged.favicon !== b.favicon
+            ) {
+              changed = true;
+            }
+            return merged;
+          });
+
+          return changed ? updated : prev;
+        });
       }
     })();
-  }, [bookmarks]);
+  }, [bookmarks, commitFromUpdater]);
 
   const addBookmark = useCallback(
     (data: Omit<Bookmark, "id" | "addedAt">) => {
-      const next = load();
-      const newBookmark: Bookmark = {
-        ...data,
-        id: crypto.randomUUID(),
-        addedAt: localDateKey(),
-      };
-      commit([newBookmark, ...next]);
+      commitFromUpdater((prev) => {
+        const newBookmark: Bookmark = {
+          ...data,
+          id: crypto.randomUUID(),
+          addedAt: localDateKey(),
+        };
+        return [newBookmark, ...prev];
+      });
     },
-    [commit]
+    [commitFromUpdater]
   );
 
   const updateBookmark = useCallback(
     (id: string, data: Omit<Bookmark, "id" | "addedAt">) => {
-      commit(bookmarks.map((b) => (b.id === id ? { ...b, ...data } : b)));
+      commitFromUpdater((prev) => prev.map((b) => (b.id === id ? { ...b, ...data } : b)));
     },
-    [bookmarks, commit]
+    [commitFromUpdater]
   );
 
   const removeBookmark = useCallback(
     (id: string) => {
-      commit(bookmarks.filter((b) => b.id !== id));
+      commitFromUpdater((prev) => prev.filter((b) => b.id !== id));
     },
-    [bookmarks, commit]
+    [commitFromUpdater]
   );
 
   const renameTag = useCallback(
     (oldName: string, newName: string) => {
       const trimmed = newName.trim().toLowerCase().replace(/\s+/g, "-");
       if (!trimmed || trimmed === oldName) return;
-      commit(
-        bookmarks.map((b) => ({
+      commitFromUpdater((prev) =>
+        prev.map((b) => ({
           ...b,
           tags: b.tags.map((t) => (t === oldName ? trimmed : t)),
         }))
@@ -239,12 +272,12 @@ export function useBookmarks() {
         return next;
       });
     },
-    [bookmarks, commit]
+    [commitFromUpdater]
   );
 
   const deleteTag = useCallback(
     (name: string) => {
-      commit(bookmarks.map((b) => ({ ...b, tags: b.tags.filter((t) => t !== name) })));
+      commitFromUpdater((prev) => prev.map((b) => ({ ...b, tags: b.tags.filter((t) => t !== name) })));
       setCustomTags((prev) => {
         if (!prev.includes(name)) return prev;
         const next = prev.filter((t) => t !== name);
@@ -252,36 +285,37 @@ export function useBookmarks() {
         return next;
       });
     },
-    [bookmarks, commit]
+    [commitFromUpdater]
   );
 
   const clearTag = useCallback(
     (name: string) => {
-      commit(bookmarks.map((b) => ({ ...b, tags: b.tags.filter((t) => t !== name) })));
+      commitFromUpdater((prev) => prev.map((b) => ({ ...b, tags: b.tags.filter((t) => t !== name) })));
     },
-    [bookmarks, commit]
+    [commitFromUpdater]
   );
 
   const importBookmarks = useCallback(
     (items: Omit<Bookmark, "id">[]) => {
-      const current = load();
-      const existingUrls = new Set(current.map((b) => normaliseUrlForImportDedupe(b.url)));
-      const seen = new Set<string>();
-      const fresh: Bookmark[] = [];
-      for (const item of items) {
-        const key = normaliseUrlForImportDedupe(item.url);
-        if (!key || existingUrls.has(key) || seen.has(key)) continue;
-        seen.add(key);
-        fresh.push({
-          ...item,
-          title: normaliseImportedTitle(item.title, item.url),
-          id: crypto.randomUUID(),
-        });
-      }
-      if (fresh.length === 0) return;
-      commit([...fresh, ...current]);
+      commitFromUpdater((prev) => {
+        const existingUrls = new Set(prev.map((b) => normaliseUrlForImportDedupe(b.url)));
+        const seen = new Set<string>();
+        const fresh: Bookmark[] = [];
+        for (const item of items) {
+          const key = normaliseUrlForImportDedupe(item.url);
+          if (!key || existingUrls.has(key) || seen.has(key)) continue;
+          seen.add(key);
+          fresh.push({
+            ...item,
+            title: normaliseImportedTitle(item.title, item.url),
+            id: crypto.randomUUID(),
+          });
+        }
+        if (fresh.length === 0) return prev;
+        return [...fresh, ...prev];
+      });
     },
-    [commit]
+    [commitFromUpdater]
   );
 
   const addTag = useCallback((name: string) => {
@@ -318,13 +352,18 @@ export function useBookmarks() {
     commit(next);
   }, [commit]);
 
-  // Always reads from localStorage first so concurrent updates don't overwrite each other
+  // Patch in-memory first, then let the storage flush effect persist.
   const patchBookmark = useCallback((id: string, updates: Partial<Omit<Bookmark, "id">>) => {
-    const current = load();
-    const next = current.map((b) => b.id === id ? { ...b, ...updates } : b);
-    save(next);
-    setBookmarks([...next]);
-  }, []);
+    commitFromUpdater((prev) => {
+      let changed = false;
+      const next = prev.map((b) => {
+        if (b.id !== id) return b;
+        changed = true;
+        return { ...b, ...updates };
+      });
+      return changed ? next : prev;
+    });
+  }, [commitFromUpdater]);
 
   return { bookmarks, customTags, addBookmark, updateBookmark, removeBookmark, importBookmarks, renameTag, deleteTag, clearTag, addTag, replaceBookmarks, replaceCustomTags, patchBookmark, allTags };
 }
