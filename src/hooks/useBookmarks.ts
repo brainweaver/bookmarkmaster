@@ -4,19 +4,18 @@ import type { Bookmark } from "../data/mockBookmarks";
 import { fetchMeta } from "../utils/fetchMeta";
 import { clampDateKeyToToday, localDateKey } from "../utils/date";
 import { visibleTags } from "../constants/tags";
-
-const STORAGE_KEY = "bookmarks_v1";
-const CUSTOM_TAGS_KEY = "custom_tags_v1";
+import { BOOKMARKS_KEY, CUSTOM_TAGS_KEY } from "../storage/keys";
+import { persistenceGetItem, persistenceSetJson } from "../storage/persistence";
 
 function load(): Bookmark[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = persistenceGetItem(BOOKMARKS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Bookmark[];
       const normalized = normaliseBookmarks(parsed);
       // Persist migration/sanitization updates for previously saved data.
       if (JSON.stringify(parsed) !== JSON.stringify(normalized)) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+        persistenceSetJson(BOOKMARKS_KEY, normalized);
       }
       return normalized;
     }
@@ -27,12 +26,12 @@ function load(): Bookmark[] {
 }
 
 function save(bookmarks: Bookmark[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normaliseBookmarks(bookmarks)));
+  persistenceSetJson(BOOKMARKS_KEY, normaliseBookmarks(bookmarks));
 }
 
 function loadCustomTags(): string[] {
   try {
-    const raw = localStorage.getItem(CUSTOM_TAGS_KEY);
+    const raw = persistenceGetItem(CUSTOM_TAGS_KEY);
     if (raw) return JSON.parse(raw);
   } catch {
     // Ignore malformed custom tags storage and return an empty list.
@@ -41,7 +40,7 @@ function loadCustomTags(): string[] {
 }
 
 function saveCustomTags(tags: string[]) {
-  localStorage.setItem(CUSTOM_TAGS_KEY, JSON.stringify(tags));
+  persistenceSetJson(CUSTOM_TAGS_KEY, tags);
 }
 
 function normaliseBookmarks(items: Bookmark[]): Bookmark[] {

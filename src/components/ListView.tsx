@@ -3,11 +3,11 @@ import type { Bookmark } from "../data/mockBookmarks";
 import { tagColor } from "../utils/tagColors";
 import { visibleTags } from "../constants/tags";
 import { previewCandidatesForLink } from "../utils/preview";
+import { LIST_COL_WIDTHS_KEY } from "../storage/keys";
+import { persistenceGetItem, persistenceSetItem } from "../storage/persistence";
 
 const THUMB_W = [52,  92, 164, 292, 520];
 const THUMB_H = [33,  58, 104, 184, 328];
-const LIST_COL_WIDTHS_KEY = "ui_list_col_widths_v1";
-
 type ListColumnKey = "title" | "url" | "tags" | "added";
 type ListColumnWidths = Record<ListColumnKey, number>;
 
@@ -27,7 +27,7 @@ const MIN_COLUMN_WIDTHS: ListColumnWidths = {
 
 function loadColumnWidths(): ListColumnWidths {
   try {
-    const raw = localStorage.getItem(LIST_COL_WIDTHS_KEY);
+    const raw = persistenceGetItem(LIST_COL_WIDTHS_KEY);
     if (!raw) return DEFAULT_COLUMN_WIDTHS;
     const parsed = JSON.parse(raw) as Partial<ListColumnWidths>;
     return {
@@ -356,7 +356,7 @@ export default function ListView({ bookmarks, zoom, onTagClick, onEdit, onDelete
   const [resizing, setResizing] = useState<{ key: ListColumnKey; startX: number; startWidth: number } | null>(null);
 
   useEffect(() => {
-    localStorage.setItem(LIST_COL_WIDTHS_KEY, JSON.stringify(colWidths));
+    persistenceSetItem(LIST_COL_WIDTHS_KEY, JSON.stringify(colWidths));
   }, [colWidths]);
 
   useEffect(() => {

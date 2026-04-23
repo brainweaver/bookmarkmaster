@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "test": "node --test tests/*.test.mjs",
     "build:ext": "tsc -b && vite build && echo '\nExtension built to dist/ \u2014 load as unpacked extension in chrome://extensions'",
     "build:browsers": "npm run build && node scripts/build-browsers.mjs",
     "lint": "eslint .",

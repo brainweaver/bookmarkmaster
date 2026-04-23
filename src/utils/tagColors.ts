@@ -1,3 +1,10 @@
+import {
+  TAG_COLOR_OVERRIDE_MAP_KEY,
+  TAG_DYNAMIC_COLOR_MAP_KEY,
+  TAG_LAST_ASSIGNED_COLOR_KEY,
+} from "../storage/keys";
+import { persistenceGetItem, persistenceSetItem } from "../storage/persistence";
+
 export const TAG_COLORS: Record<string, string> = {
   dev: "#3b82f6",
   code: "#6366f1",
@@ -28,10 +35,6 @@ const TAG_FALLBACK_PALETTE = [
   "#14b8a6",
 ];
 
-const TAG_DYNAMIC_COLOR_MAP_KEY = "ui_tag_dynamic_colors_v1";
-const TAG_LAST_ASSIGNED_COLOR_KEY = "ui_tag_last_assigned_color_v1";
-const TAG_COLOR_OVERRIDE_MAP_KEY = "ui_tag_color_overrides_v1";
-
 let dynamicTagColorMap: Record<string, string> | null = null;
 let lastAssignedDynamicColor: string | null = null;
 let tagColorOverrideMap: Record<string, string> | null = null;
@@ -39,7 +42,7 @@ let tagColorOverrideMap: Record<string, string> | null = null;
 function loadDynamicTagColorMap(): Record<string, string> {
   if (dynamicTagColorMap) return dynamicTagColorMap;
   try {
-    const raw = localStorage.getItem(TAG_DYNAMIC_COLOR_MAP_KEY);
+    const raw = persistenceGetItem(TAG_DYNAMIC_COLOR_MAP_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       dynamicTagColorMap = Object.fromEntries(
@@ -55,7 +58,7 @@ function loadDynamicTagColorMap(): Record<string, string> {
   }
 
   try {
-    const last = localStorage.getItem(TAG_LAST_ASSIGNED_COLOR_KEY);
+    const last = persistenceGetItem(TAG_LAST_ASSIGNED_COLOR_KEY);
     lastAssignedDynamicColor = last && TAG_FALLBACK_PALETTE.includes(last) ? last : null;
   } catch {
     lastAssignedDynamicColor = null;
@@ -66,8 +69,8 @@ function loadDynamicTagColorMap(): Record<string, string> {
 
 function saveDynamicTagColorMap(map: Record<string, string>, last: string) {
   try {
-    localStorage.setItem(TAG_DYNAMIC_COLOR_MAP_KEY, JSON.stringify(map));
-    localStorage.setItem(TAG_LAST_ASSIGNED_COLOR_KEY, last);
+    persistenceSetItem(TAG_DYNAMIC_COLOR_MAP_KEY, JSON.stringify(map));
+    persistenceSetItem(TAG_LAST_ASSIGNED_COLOR_KEY, last);
   } catch {
     // best-effort persistence only
   }
@@ -110,7 +113,7 @@ function assignDynamicTagColor(tag: string): string {
 function loadTagColorOverrideMap(): Record<string, string> {
   if (tagColorOverrideMap) return tagColorOverrideMap;
   try {
-    const raw = localStorage.getItem(TAG_COLOR_OVERRIDE_MAP_KEY);
+    const raw = persistenceGetItem(TAG_COLOR_OVERRIDE_MAP_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       tagColorOverrideMap = Object.fromEntries(
@@ -127,7 +130,7 @@ function loadTagColorOverrideMap(): Record<string, string> {
 
 function saveTagColorOverrideMap(map: Record<string, string>) {
   try {
-    localStorage.setItem(TAG_COLOR_OVERRIDE_MAP_KEY, JSON.stringify(map));
+    persistenceSetItem(TAG_COLOR_OVERRIDE_MAP_KEY, JSON.stringify(map));
   } catch {
     // best-effort persistence only
   }
@@ -161,4 +164,3 @@ export function cycleTagColor(tag: string): string {
 
   return next;
 }
-

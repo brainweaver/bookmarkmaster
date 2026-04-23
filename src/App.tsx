@@ -11,6 +11,30 @@ import { localDateKey } from "./utils/date";
 import { SYSTEM_TAG_NOT_REACHABLE, SYSTEM_TAG_NOT_UNIQUE, visibleTags } from "./constants/tags";
 import type { Bookmark } from "./data/mockBookmarks";
 import { t } from "./i18n";
+import {
+  APP_CATALOG_KEY,
+  APP_SHORTCUTS_KEY,
+} from "./storage/keys";
+import { persistenceGetItem, persistenceSetItem } from "./storage/persistence";
+import {
+  readCleanupBypassTagsPreference,
+  readDisplayModePreference,
+  readGroupByDatePreference,
+  readRankOrderPreference,
+  readSortByPreference,
+  readTagOrderPreference,
+  readThemePreference,
+  readZoomPreference,
+  sanitizeBackupPreferences,
+  writeCleanupBypassTagsPreference,
+  writeDisplayModePreference,
+  writeGroupByDatePreference,
+  writeRankOrderPreference,
+  writeSortByPreference,
+  writeTagOrderPreference,
+  writeThemePreference,
+  writeZoomPreference,
+} from "./storage/preferences";
 
 function gridColumnsFromZoom(zoom: number): number {
   const normalized = (Math.max(1, Math.min(5, zoom)) - 1) / 4;
@@ -24,10 +48,6 @@ const BOOKMARK_DRAG_FALLBACK_PREFIX = "bookmark:";
 const TAG_DRAG_MIME = "application/x-sidebar-tag";
 const APP_SHORTCUT_DRAG_MIME = "application/x-app-shortcut-id";
 const APP_SHORTCUT_DRAG_FALLBACK_PREFIX = "app-shortcut:";
-const TAG_ORDER_KEY = "ui_tag_order_v1";
-const APP_SHORTCUTS_KEY = "ui_app_shortcuts_v1";
-const APP_CATALOG_KEY = "ui_app_catalog_v1";
-const CLEANUP_BYPASS_TAGS_KEY = "ui_cleanup_bypass_tags_v1";
 
 type AppShortcut = {
   id: string;
@@ -646,7 +666,7 @@ function mergeCatalogWithDefaults(current: AppGroup[]): AppGroup[] {
 
 function loadAppCatalog(): AppGroup[] {
   try {
-    const raw = localStorage.getItem(APP_CATALOG_KEY);
+    const raw = persistenceGetItem(APP_CATALOG_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
@@ -675,7 +695,7 @@ function loadAppCatalog(): AppGroup[] {
 
 function loadAppShortcuts(): AppShortcut[] {
   try {
-    const raw = localStorage.getItem(APP_SHORTCUTS_KEY);
+    const raw = persistenceGetItem(APP_SHORTCUTS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
@@ -724,12 +744,6 @@ type BackupPayloadV2 = {
   preferences: BackupPreferences;
 };
 
-const PREF_THEME_KEY = "ui_theme_v1";
-const PREF_DISPLAY_MODE_KEY = "ui_display_mode_v1";
-const PREF_GROUP_BY_DATE_KEY = "ui_group_by_date_v1";
-const PREF_SORT_BY_KEY = "ui_sort_by_v1";
-const PREF_RANK_ORDER_KEY = "ui_rank_order_v1";
-const PREF_ZOOM_KEY = "ui_zoom_v1";
 const THEME_CYCLE = ["white", "gray", "red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "brown", "white-mid", "gray-mid", "red-mid", "orange-mid", "yellow-mid", "green-mid", "cyan-mid", "blue-mid", "purple-mid", "pink-mid", "brown-mid", "black", "white-night", "gray-night", "red-night", "orange-night", "yellow-night", "green-night", "cyan-night", "blue-night", "purple-night", "pink-night", "brown-night", "dark", "midnight", "ocean", "dusk", "slate-night", "sapphire-night", "indigo-deep", "teal-night", "graphite", "high-contrast"] as const;
 type ThemeId = typeof THEME_CYCLE[number];
 const DARK_THEME_IDS = new Set<ThemeId>(["black", "white-night", "gray-night", "red-night", "orange-night", "yellow-night", "green-night", "cyan-night", "blue-night", "purple-night", "pink-night", "brown-night", "dark", "midnight", "ocean", "dusk", "slate-night", "sapphire-night", "indigo-deep", "teal-night", "graphite", "high-contrast"]);
@@ -818,88 +832,35 @@ function stripSystemTagsFromBookmarks(items: Bookmark[]): Bookmark[] {
 }
 
 function loadTheme(): ThemeId {
-  try {
-    const raw = localStorage.getItem(PREF_THEME_KEY);
-    return THEME_CYCLE.includes(raw as ThemeId) ? (raw as ThemeId) : "ocean";
-  } catch {
-    return "ocean";
-  }
+  return readThemePreference(THEME_CYCLE, "ocean");
 }
 
 function loadDisplayMode(): DisplayMode {
-  try {
-    const raw = localStorage.getItem(PREF_DISPLAY_MODE_KEY);
-    return raw === "grid" || raw === "list" || raw === "preview" ? raw : "list";
-  } catch {
-    return "list";
-  }
+  return readDisplayModePreference("list");
 }
 
 function loadGroupByDate(): boolean {
-  try {
-    const raw = localStorage.getItem(PREF_GROUP_BY_DATE_KEY);
-    if (raw === null) return true;
-    return raw === "true";
-  } catch {
-    return true;
-  }
+  return readGroupByDatePreference(true);
 }
 
 function loadSortBy(): SortBy {
-  try {
-    const raw = localStorage.getItem(PREF_SORT_BY_KEY);
-    return raw === "date" || raw === "name" || raw === "ranking" ? raw : "date";
-  } catch {
-    return "date";
-  }
+  return readSortByPreference("date");
 }
 
 function loadZoom(): number {
-  try {
-    const raw = localStorage.getItem(PREF_ZOOM_KEY);
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed)) return 3;
-    return Math.max(1, Math.min(5, parsed));
-  } catch {
-    return 3;
-  }
+  return readZoomPreference(3, 1, 5);
 }
 
 function loadRankOrder(): string[] {
-  try {
-    const raw = localStorage.getItem(PREF_RANK_ORDER_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
+  return readRankOrderPreference();
 }
 
 function loadTagOrder(): string[] {
-  try {
-    const raw = localStorage.getItem(TAG_ORDER_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
+  return readTagOrderPreference();
 }
 
 function loadCleanupBypassTags(): string[] {
-  try {
-    const raw = localStorage.getItem(CLEANUP_BYPASS_TAGS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((x): x is string => typeof x === "string")
-      .map((x) => normalizeTagName(x))
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
+  return readCleanupBypassTagsPreference();
 }
 
 export default function App() {
@@ -1029,43 +990,43 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(PREF_THEME_KEY, theme);
+    writeThemePreference(theme);
   }, [theme]);
 
   useEffect(() => {
-    localStorage.setItem(PREF_DISPLAY_MODE_KEY, displayMode);
+    writeDisplayModePreference(displayMode);
   }, [displayMode]);
 
   useEffect(() => {
-    localStorage.setItem(PREF_GROUP_BY_DATE_KEY, String(groupByDate));
+    writeGroupByDatePreference(groupByDate);
   }, [groupByDate]);
 
   useEffect(() => {
-    localStorage.setItem(PREF_SORT_BY_KEY, sortBy);
+    writeSortByPreference(sortBy);
   }, [sortBy]);
 
   useEffect(() => {
-    localStorage.setItem(PREF_RANK_ORDER_KEY, JSON.stringify(rankOrder));
+    writeRankOrderPreference(rankOrder);
   }, [rankOrder]);
 
   useEffect(() => {
-    localStorage.setItem(PREF_ZOOM_KEY, String(zoom));
+    writeZoomPreference(zoom);
   }, [zoom]);
 
   useEffect(() => {
-    localStorage.setItem(TAG_ORDER_KEY, JSON.stringify(tagOrder));
+    writeTagOrderPreference(tagOrder);
   }, [tagOrder]);
 
   useEffect(() => {
-    localStorage.setItem(CLEANUP_BYPASS_TAGS_KEY, JSON.stringify(cleanupBypassTags));
+    writeCleanupBypassTagsPreference(cleanupBypassTags);
   }, [cleanupBypassTags]);
 
   useEffect(() => {
-    localStorage.setItem(APP_SHORTCUTS_KEY, JSON.stringify(appShortcuts));
+    persistenceSetItem(APP_SHORTCUTS_KEY, JSON.stringify(appShortcuts));
   }, [appShortcuts]);
 
   useEffect(() => {
-    localStorage.setItem(APP_CATALOG_KEY, JSON.stringify(appCatalog));
+    persistenceSetItem(APP_CATALOG_KEY, JSON.stringify(appCatalog));
   }, [appCatalog]);
 
   useEffect(() => {
@@ -1077,16 +1038,31 @@ export default function App() {
       .filter((b) => typeof b.ranking === "number")
       .sort((a, b) => (b.ranking ?? 0) - (a.ranking ?? 0))
       .map((b) => b.id);
-    if (rankedIds.length > 0) setRankOrder(rankedIds);
+    if (rankedIds.length === 0) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setRankOrder(rankedIds);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [bookmarks, rankOrder]);
 
   useEffect(() => {
     const bookmarkIds = bookmarks.map((b) => b.id);
     const bookmarkSet = new Set(bookmarkIds);
-    setRankOrder((prev) => {
-      const next = prev.filter((id) => bookmarkSet.has(id));
-      return next.length === prev.length ? prev : next;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setRankOrder((prev) => {
+        const next = prev.filter((id) => bookmarkSet.has(id));
+        return next.length === prev.length ? prev : next;
+      });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [bookmarks]);
 
   const filtered = useMemo(() => {
@@ -1427,29 +1403,39 @@ export default function App() {
       return;
     }
     if (draggedId === targetId) return;
-    const visualOrder = sorted.map((b) => b.id);
-    const from = visualOrder.indexOf(draggedId);
-    const to = visualOrder.indexOf(targetId);
-    if (from < 0 || to < 0) return;
+    const visibleOrder = sorted.map((b) => b.id);
+    const visibleFrom = visibleOrder.indexOf(draggedId);
+    const visibleTo = visibleOrder.indexOf(targetId);
+    if (visibleFrom < 0 || visibleTo < 0) return;
+    const placeAfter = visibleFrom < visibleTo;
 
-    const nextVisible = [...visualOrder];
-    nextVisible.splice(from, 1);
-    nextVisible.splice(to, 0, draggedId);
+    // Rebuild reorder state from a full list so moving one card never drops
+    // ranking for unrelated cards.
+    const rankIdx = new Map(rankOrder.map((id, idx) => [id, idx] as const));
+    const fullOrder = [...bookmarks]
+      .sort((a, b) => {
+        const ai = rankIdx.get(a.id);
+        const bi = rankIdx.get(b.id);
+        if (ai !== undefined && bi !== undefined) return ai - bi;
+        if (ai !== undefined) return -1;
+        if (bi !== undefined) return 1;
+        return (b.ranking ?? 0) - (a.ranking ?? 0);
+      })
+      .map((b) => b.id);
 
-    const bookmarkIds = new Set(bookmarks.map((b) => b.id));
-    const ranked = rankOrder.filter((id) => bookmarkIds.has(id));
-    const placeAfter = from < to;
-    const nextRanked = [...ranked];
-    if (!nextRanked.includes(targetId)) nextRanked.push(targetId);
-    const existingDraggedIdx = nextRanked.indexOf(draggedId);
-    if (existingDraggedIdx >= 0) nextRanked.splice(existingDraggedIdx, 1);
-    const targetIdx = nextRanked.indexOf(targetId);
-    const insertIdx = Math.max(0, Math.min(nextRanked.length, targetIdx + (placeAfter ? 1 : 0)));
-    nextRanked.splice(insertIdx, 0, draggedId);
-    setRankOrder(nextRanked);
+    const from = fullOrder.indexOf(draggedId);
+    const target = fullOrder.indexOf(targetId);
+    if (from < 0 || target < 0) return;
 
-    const total = nextRanked.length;
-    const rankingMap = new Map(nextRanked.map((id, idx) => [id, total - idx]));
+    const nextOrder = [...fullOrder];
+    nextOrder.splice(from, 1);
+    const adjustedTarget = target > from ? target - 1 : target;
+    const insertIdx = Math.max(0, Math.min(nextOrder.length, adjustedTarget + (placeAfter ? 1 : 0)));
+    nextOrder.splice(insertIdx, 0, draggedId);
+    setRankOrder(nextOrder);
+
+    const total = nextOrder.length;
+    const rankingMap = new Map(nextOrder.map((id, idx) => [id, total - idx] as const));
 
     replaceBookmarks(
       bookmarks.map((b) => ({
@@ -1836,15 +1822,14 @@ export default function App() {
           replaceCustomTags(payload.customTags);
         }
 
-        const prefs = payload.preferences;
-        if (prefs && typeof prefs === "object") {
-          if (prefs.theme && THEME_CYCLE.includes(prefs.theme)) setTheme(prefs.theme);
-          if (prefs.displayMode === "grid" || prefs.displayMode === "list" || prefs.displayMode === "preview") setDisplayMode(prefs.displayMode);
-          if (typeof prefs.groupByDate === "boolean") setGroupByDate(prefs.groupByDate);
-          if (prefs.sortBy === "date" || prefs.sortBy === "name" || prefs.sortBy === "ranking") setSortBy(prefs.sortBy);
-          if (Array.isArray(prefs.rankOrder)) {
-            setRankOrder(prefs.rankOrder.filter((id): id is string => typeof id === "string"));
-          } else {
+        const prefs = sanitizeBackupPreferences(payload.preferences, THEME_CYCLE);
+        if (prefs.theme && THEME_CYCLE.includes(prefs.theme as ThemeId)) setTheme(prefs.theme as ThemeId);
+        if (prefs.displayMode) setDisplayMode(prefs.displayMode);
+        if (typeof prefs.groupByDate === "boolean") setGroupByDate(prefs.groupByDate);
+        if (prefs.sortBy) setSortBy(prefs.sortBy);
+        if (Array.isArray(prefs.rankOrder)) {
+          setRankOrder(prefs.rankOrder);
+        } else {
             // Fallback for older backups: derive ranking order from bookmark.ranking.
             const fallbackRankOrder = (payload.bookmarks ?? [])
               .filter((b) => typeof b.ranking === "number")
@@ -1854,26 +1839,19 @@ export default function App() {
             if (fallbackRankOrder.length > 0) {
               setRankOrder(fallbackRankOrder);
             }
-          }
-          if (typeof prefs.zoom === "number" && Number.isFinite(prefs.zoom)) setZoom(Math.max(1, Math.min(5, prefs.zoom)));
-          if (Array.isArray(prefs.tagOrder)) setTagOrder(prefs.tagOrder.filter((t): t is string => typeof t === "string"));
-          if (Array.isArray(prefs.cleanupBypassTags)) {
-            setCleanupBypassTags(
-              prefs.cleanupBypassTags
-                .filter((t): t is string => typeof t === "string")
-                .map((t) => normalizeTagName(t))
-                .filter(Boolean)
-            );
-          }
-          if (typeof prefs.sidebarOpen === "boolean") setSidebarOpen(prefs.sidebarOpen);
-          if (Array.isArray(prefs.appShortcuts)) {
+        }
+        if (typeof prefs.zoom === "number") setZoom(prefs.zoom);
+        if (Array.isArray(prefs.tagOrder)) setTagOrder(prefs.tagOrder);
+        if (Array.isArray(prefs.cleanupBypassTags)) setCleanupBypassTags(prefs.cleanupBypassTags);
+        if (typeof prefs.sidebarOpen === "boolean") setSidebarOpen(prefs.sidebarOpen);
+        if (Array.isArray(prefs.appShortcuts)) {
             const restoredApps = prefs.appShortcuts
               .filter((item) => !!item && typeof item === "object")
               .map((item) => normaliseAppShortcut(item as Record<string, unknown>, "Custom"))
               .filter((item): item is AppShortcut => item !== null);
             setAppShortcuts(restoredApps);
-          }
-          if (Array.isArray(prefs.appCatalog)) {
+        }
+        if (Array.isArray(prefs.appCatalog)) {
             const restoredCatalog = prefs.appCatalog
               .filter((g) => !!g && typeof g === "object")
               .map((g) => {
@@ -1889,7 +1867,6 @@ export default function App() {
               })
               .filter((g): g is AppGroup => g !== null);
             setAppCatalog(restoredCatalog);
-          }
         }
       } catch {
         alert("Could not read backup file — make sure it's a valid bookmarks backup JSON.");
