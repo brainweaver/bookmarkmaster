@@ -1,4 +1,5 @@
-import { getYoutubeVideoId } from "./preview";
+import { getYoutubeVideoId } from "./preview.ts";
+import { NETWORK_TIMEOUTS_MS } from "../config/network.ts";
 
 // Fetches page metadata (title, description, favicon) directly from a URL.
 // Extension pages have <all_urls> host permission so cross-origin fetch works.
@@ -49,7 +50,7 @@ export async function fetchMeta(
     for (const endpoint of endpoints) {
       try {
         const res = await fetch(endpoint, {
-          signal: AbortSignal.timeout(8000),
+          signal: AbortSignal.timeout(NETWORK_TIMEOUTS_MS.metadata),
           credentials: "omit",
         });
         if (!res.ok) continue;
@@ -82,7 +83,7 @@ export async function fetchMeta(
 
   try {
     const res = await fetch(url, {
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(NETWORK_TIMEOUTS_MS.metadata),
       // Avoid sending cookies — we only want public metadata
       credentials: "omit",
     });
@@ -130,31 +131,59 @@ export async function fetchMeta(
   }
 }
 
-export async function isReachable(url: string): Promise<boolean> {
-  const definitelyMissing = new Set([404, 410]);
-
+function mainDomainUrl(rawUrl: string): string | null {
   try {
-    const head = await fetch(url, {
-      method: "HEAD",
-      signal: AbortSignal.timeout(8000),
-      credentials: "omit",
-    });
-    if (head.ok) return true;
-    // If server responded, the host is reachable. Only "missing" statuses
-    // should remain candidates for Not Reachable.
-    if (!definitelyMissing.has(head.status)) return true;
+    const parsed = new URL(rawUrl);
+    parsed.pathname = "/";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
   } catch {
-    // Fall through to GET fallback.
+    return null;
   }
+}
 
+type ProbeOutcome = "reachable" | "unreachable" | "unknown";
+
+async function probeUrl(url: string): Promise<ProbeOutcome> {
   try {
     const get = await fetch(url, {
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(NETWORK_TIMEOUTS_MS.reachability),
       credentials: "omit",
     });
-    if (get.ok) return true;
-    return !definitelyMissing.has(get.status);
+    if (get.ok) return "reachable";
+    return "unreachable";
   } catch {
-    return false;
+    return "unknown";
   }
+}
+
+export async function resolveReachability(
+  url: string
+): Promise<{ reachable: boolean; resolvedUrl: string | null }> {
+  const primaryProbe = await probeUrl(url);
+  if (primaryProbe === "reachable") {
+    return { reachable: true, resolvedUrl: url };
+  }
+  if (primaryProbe === "unreachable") {
+    return { reachable: false, resolvedUrl: null };
+  }
+
+  const fallback = mainDomainUrl(url);
+  if (fallback && fallback !== url) {
+    const fallbackProbe = await probeUrl(fallback);
+    if (fallbackProbe === "reachable") {
+      return { reachable: true, resolvedUrl: fallback };
+    }
+    if (fallbackProbe === "unreachable") {
+      return { reachable: false, resolvedUrl: null };
+    }
+  }
+
+  return { reachable: false, resolvedUrl: null };
+}
+
+export async function isReachable(url: string): Promise<boolean> {
+  const result = await resolveReachability(url);
+  return result.reachable;
 }

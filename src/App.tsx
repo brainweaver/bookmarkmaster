@@ -6,7 +6,7 @@ import BookmarkModal from "./components/BookmarkModal";
 import ImportExportModal from "./components/ImportExportModal";
 import { cycleTagColor, tagColor } from "./utils/tagColors";
 import { useBookmarks } from "./hooks/useBookmarks";
-import { fetchMeta, isReachable } from "./utils/fetchMeta";
+import { fetchMeta, resolveReachability } from "./utils/fetchMeta";
 import { localDateKey } from "./utils/date";
 import { SYSTEM_TAG_NOT_REACHABLE, SYSTEM_TAG_NOT_UNIQUE, visibleTags } from "./constants/tags";
 import type { Bookmark } from "./data/mockBookmarks";
@@ -1946,15 +1946,35 @@ export default function App() {
 
     for (let i = 0; i < nextBookmarks.length; i++) {
       const b = nextBookmarks[i];
-      const reachable = await isReachable(b.url);
+      const reachability = await resolveReachability(b.url);
       const hasUnreachableTag = b.tags.includes(SYSTEM_TAG_NOT_REACHABLE);
-      if (!reachable && !hasUnreachableTag) {
+      if (!reachability.reachable && !hasUnreachableTag) {
         nextBookmarks[i] = { ...b, tags: [...b.tags, SYSTEM_TAG_NOT_REACHABLE] };
-      } else if (reachable && hasUnreachableTag) {
-        nextBookmarks[i] = {
-          ...b,
-          tags: b.tags.filter((t) => t !== SYSTEM_TAG_NOT_REACHABLE),
-        };
+      } else if (reachability.reachable) {
+        const nextUrl = reachability.resolvedUrl ?? b.url;
+        const nextTags = hasUnreachableTag
+          ? b.tags.filter((t) => t !== SYSTEM_TAG_NOT_REACHABLE)
+          : b.tags;
+
+        if (nextUrl !== b.url) {
+          const meta = await fetchMeta(nextUrl);
+          const nextTitle = meta.title?.trim() || b.title;
+          const nextDescription = meta.description?.trim();
+          const nextFavicon = meta.favicon || b.favicon;
+          nextBookmarks[i] = {
+            ...b,
+            url: nextUrl,
+            title: nextTitle,
+            description: nextDescription ?? b.description,
+            favicon: nextFavicon,
+            tags: nextTags,
+          };
+        } else if (hasUnreachableTag) {
+          nextBookmarks[i] = {
+            ...b,
+            tags: nextTags,
+          };
+        }
       }
       setCleanupState((s) => ({ ...s, progress: needsMeta.length + i + 1 }));
     }
