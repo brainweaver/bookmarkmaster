@@ -15,6 +15,11 @@ body { overflow: hidden; }
   --icon-filter:  invert(1) brightness(0.78);
   --sun-fill:     transparent;
   --theme-icon-color: #d8dce3;
+  --bookmark-card-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  --bookmark-card-action-bg: rgba(28,28,30,0.85);
+  --bookmark-card-action-hover-bg: var(--border-hover);
+  --bookmark-card-action-border: none;
+  --bookmark-card-action-color: var(--text-2);
 }
 
 [data-theme="light"] {
@@ -30,6 +35,11 @@ body { overflow: hidden; }
   --icon-filter:  none;
   --sun-fill:     #ffd35f;
   --theme-icon-color: #6b7280;
+  --bookmark-card-shadow: 0 1px 8px rgba(15, 23, 42, 0.08);
+  --bookmark-card-action-bg: rgba(255,255,255,0.96);
+  --bookmark-card-action-hover-bg: #eef2f7;
+  --bookmark-card-action-border: 1px solid var(--border);
+  --bookmark-card-action-color: #475569;
 }
 
 [data-theme="soft-ivory"] {

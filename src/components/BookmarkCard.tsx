@@ -103,7 +103,7 @@ export default function BookmarkCard({
           color: "inherit",
           overflow: "hidden",
           transition: "border-color 0.15s, box-shadow 0.15s",
-          boxShadow: hovered ? "0 4px 20px rgba(0,0,0,0.4)" : "none",
+          boxShadow: hovered ? "var(--bookmark-card-shadow)" : "none",
           cursor: "pointer",
           height: showPreview ? previewCardHeight : gridCardHeight,
         }}
@@ -264,7 +264,7 @@ export default function BookmarkCard({
             </span>
           )}
 
-          <div style={{ display: "flex", flexWrap: "nowrap", gap: 4, overflow: "hidden", minHeight: 22 }}>
+          <div style={{ display: "flex", flexWrap: "nowrap", gap: 4, overflow: "hidden", minHeight: 18 }}>
             {visibleTags(bookmark.tags).map((tag) => (
               <span
                 key={tag}
@@ -282,6 +282,7 @@ export default function BookmarkCard({
                   border: `1px solid ${tagColor(tag)}44`,
                   cursor: "pointer",
                   whiteSpace: "nowrap",
+                  lineHeight: 1.2,
                 }}
               >
                 {tag}
@@ -368,15 +369,15 @@ function ActionBtn({
         width: 26,
         height: 26,
         borderRadius: 6,
-        border: confirming ? "1px solid #ef444466" : "none",
+        border: confirming ? "1px solid #ef444466" : "var(--bookmark-card-action-border)",
         background: confirming
           ? "#ef444433"
           : hov
           ? danger
             ? "#ef444433"
-            : "var(--border-hover)"
-          : "rgba(28,28,30,0.85)",
-        color: confirming || (hov && danger) ? "#ef4444" : "var(--text-2)",
+            : "var(--bookmark-card-action-hover-bg)"
+          : "var(--bookmark-card-action-bg)",
+        color: confirming || (hov && danger) ? "#ef4444" : "var(--bookmark-card-action-color)",
         cursor: "pointer",
         backdropFilter: "blur(4px)",
         transition: "background 0.12s, color 0.12s",

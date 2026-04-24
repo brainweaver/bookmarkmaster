@@ -229,6 +229,7 @@ export default function BookmarkModal({ initial, prefill, existingTags, onSave, 
                     color: tagColor(tag),
                     border: `1px solid ${tagColor(tag)}44`,
                     userSelect: "none",
+                    lineHeight:1.2
                   }}
                 >
                   {tag}

@@ -110,7 +110,7 @@ function ListRow({ bookmark, zoom, colWidths, onTagClick, onEdit, onDelete, onDr
         display: "flex",
         alignItems: "center",
         gap: 10,
-        padding: "7px 12px",
+        padding: "10px 12px",
         background: dragOver ? "var(--card)" : hovered ? "var(--card)" : "transparent",
         borderRadius: 8,
         border: `1px solid ${dragOver ? "#3b82f6" : "transparent"}`,
@@ -251,10 +251,11 @@ function ListRow({ bookmark, zoom, colWidths, onTagClick, onEdit, onDelete, onDr
             key={tag}
             onClick={() => onTagClick(tag)}
             style={{
-              fontSize: 11, padding: "2px 7px", borderRadius: 99,
+              fontSize: 10, padding: "3px 7px", borderRadius: 99,
               background: tagColor(tag) + "22", color: tagColor(tag),
               border: `1px solid ${tagColor(tag)}44`,
               cursor: "pointer", whiteSpace: "nowrap",
+              lineHeight: 1.2,
             }}
           >
             {tag}
@@ -513,7 +514,7 @@ function ListHeader({
     </span>
   );
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 12px 6px", borderBottom: "1px solid #2c2c2e", marginBottom: 2 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 12px 6px", borderBottom: "1px solid #dfdfdf", marginBottom: 2 }}>
       {showPreview && <span style={{ width: THUMB_W[zoomIndex], flexShrink: 0 }} />}
       <span style={{ width: 18, flexShrink: 0 }} />
       {cell("Title",       { width: colWidths.title, flexShrink: 0 }, "title", "right")}

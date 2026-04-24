@@ -356,7 +356,7 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
         background: "var(--card)", border: "1px solid var(--border-hover)",
         borderRadius: 14, padding: 24, width: 640,
         maxWidth: "calc(100vw - 40px)",
-        display: "flex", flexDirection: "column", gap: 20,
+        display: "flex", flexDirection: "column", gap: 24,
         boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
       }}>
         {/* Header */}
@@ -439,7 +439,7 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
         )}
 
         {/* Import section */}{section !== "export" && <>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {/* Header row: IMPORT label on left, Import Tags label + pill input on right */}
           <div style={{ display: "flex", alignItems: "center" }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", letterSpacing: "0.07em", textTransform: "uppercase" }}>
@@ -706,7 +706,7 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
 
 function Row({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
       {children}
     </div>
   );
@@ -723,8 +723,8 @@ function ActionBtn({
       disabled={disabled}
       style={{
         width: "100%", minWidth: 0,
-        display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4,
-        padding: "12px 14px", borderRadius: 10,
+        display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6,
+        padding: "14px 14px", borderRadius: 10,
         background: "var(--surface)", border: "1px solid var(--border-hover)",
         color: "var(--text)", cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.5 : 1,

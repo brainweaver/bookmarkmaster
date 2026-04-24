@@ -746,11 +746,17 @@ type BackupPayloadV2 = {
 
 const THEME_CYCLE = ["white", "gray", "red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "brown", "white-mid", "gray-mid", "red-mid", "orange-mid", "yellow-mid", "green-mid", "cyan-mid", "blue-mid", "purple-mid", "pink-mid", "brown-mid", "black", "white-night", "gray-night", "red-night", "orange-night", "yellow-night", "green-night", "cyan-night", "blue-night", "purple-night", "pink-night", "brown-night", "dark", "midnight", "ocean", "dusk", "slate-night", "sapphire-night", "indigo-deep", "teal-night", "graphite", "high-contrast"] as const;
 type ThemeId = typeof THEME_CYCLE[number];
-const DARK_THEME_IDS = new Set<ThemeId>(["black", "white-night", "gray-night", "red-night", "orange-night", "yellow-night", "green-night", "cyan-night", "blue-night", "purple-night", "pink-night", "brown-night", "dark", "midnight", "ocean", "dusk", "slate-night", "sapphire-night", "indigo-deep", "teal-night", "graphite", "high-contrast"]);
 
 function nextTheme(current: ThemeId): ThemeId {
   const idx = THEME_CYCLE.indexOf(current);
   return THEME_CYCLE[(idx + 1) % THEME_CYCLE.length];
+}
+
+function formatThemeLabel(theme: string): string {
+  return theme
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function normaliseUrlForDedupe(rawUrl: string): string {
@@ -869,6 +875,7 @@ export default function App() {
   const [showExport, setShowExport] = useState(false);
 
   const [theme, setTheme] = useState<ThemeId>(loadTheme);
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false);
   const [displayMode, setDisplayMode] = useState<DisplayMode>(loadDisplayMode);
   const [groupByDate, setGroupByDate] = useState(loadGroupByDate);
   const [zoom, setZoom] = useState(loadZoom);
@@ -891,6 +898,7 @@ export default function App() {
   const [cleanupResult, setCleanupResult] = useState<{ removed: number; missingFound: number; missingFixed: number; notUnique: number; notReachable: number } | null>(null);
   const [showDataMenu, setShowDataMenu] = useState(false);
   const dataMenuRef = useRef<HTMLDivElement>(null);
+  const themeMenuRef = useRef<HTMLDivElement>(null);
   const restoreFileRef = useRef<HTMLInputElement>(null);
   const [showDeleteAll, setShowDeleteAll] = useState(false);
   const [showClearAllTags, setShowClearAllTags] = useState(false);
@@ -901,6 +909,8 @@ export default function App() {
   const [appCatalog, setAppCatalog] = useState<AppGroup[]>(loadAppCatalog);
   const [appShortcuts, setAppShortcuts] = useState<AppShortcut[]>(loadAppShortcuts);
   const [showAppPicker, setShowAppPicker] = useState(false);
+  const [appSearch, setAppSearch] = useState("");
+  const [appPickerSelection, setAppPickerSelection] = useState<string[]>([]);
   const [customAppName, setCustomAppName] = useState("");
   const [customAppUrl, setCustomAppUrl] = useState("");
   const [customAppIconUrl, setCustomAppIconUrl] = useState("");
@@ -923,6 +933,17 @@ export default function App() {
     selectedTag === NOT_TAGGED_FILTER || selectedTag === NOT_UNIQUE_FILTER || selectedTag === NOT_REACHABLE_FILTER
       ? null
       : selectedTag;
+  const themeLabel = formatThemeLabel(theme);
+  const filteredAppCatalog = useMemo(() => {
+    const query = appSearch.trim().toLowerCase();
+    if (!query) return appCatalog;
+    return appCatalog
+      .map((group) => ({
+        ...group,
+        apps: group.apps.filter((app) => app.name.toLowerCase().includes(query)),
+      }))
+      .filter((group) => group.apps.length > 0);
+  }, [appCatalog, appSearch]);
   const orderedSidebarTags = useMemo(() => {
     const orderedExisting = tagOrder.filter((t) => allTags.includes(t));
     const remaining = allTags.filter((t) => !orderedExisting.includes(t));
@@ -955,6 +976,25 @@ export default function App() {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [showDataMenu]);
+
+  useEffect(() => {
+    if (!themeMenuOpen) return;
+    const closeOnOutsideClick = (e: MouseEvent) => {
+      if (!themeMenuRef.current) return;
+      if (!themeMenuRef.current.contains(e.target as Node)) {
+        setThemeMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setThemeMenuOpen(false);
+    };
+    window.addEventListener("click", closeOnOutsideClick);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("click", closeOnOutsideClick);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [themeMenuOpen]);
 
   useEffect(() => {
     if (!appContextMenu) return;
@@ -1530,13 +1570,18 @@ export default function App() {
     });
   };
 
-  const handlePresetAppAdd = (app: AppShortcut) => {
-    addAppShortcut(app);
+  const toggleAppPickerSelection = (app: AppShortcut) => {
+    setAppPickerSelection((prev) =>
+      prev.includes(app.id) ? prev.filter((id) => id !== app.id) : [...prev, app.id]
+    );
+  };
+
+  const confirmAppPickerSelection = () => {
+    const selectedApps = appCatalog.flatMap((group) => group.apps).filter((app) => appPickerSelection.includes(app.id));
+    selectedApps.forEach((app) => addAppShortcut(app));
     setShowAppPicker(false);
-    setCustomAppName("");
-    setCustomAppUrl("");
-    setCustomAppIconUrl("");
-    setAppPickerError(null);
+    setAppPickerSelection([]);
+    setAppSearch("");
   };
 
   const handleCustomAppAdd = async () => {
@@ -1573,6 +1618,7 @@ export default function App() {
       };
       addAppShortcut(app);
       setShowAppPicker(false);
+      setAppPickerSelection([]);
       setCustomAppName("");
       setCustomAppUrl("");
       setCustomAppIconUrl("");
@@ -2061,7 +2107,7 @@ export default function App() {
                 Apps
               </span>
               <button
-                onClick={() => { setShowAppPicker(true); setAppPickerError(null); }}
+                onClick={() => { setShowAppPicker(true); setAppPickerError(null); setAppSearch(""); }}
                 title="Add app shortcut"
                 style={{
                   background: "none", border: "1px solid var(--border-hover)", borderRadius: 5,
@@ -2329,18 +2375,135 @@ export default function App() {
             >
               <IconSidebar flipped={!sidebarOpen} />
             </button>
-            <button
-              onClick={() => setTheme((t) => nextTheme(t))}
-              title={t("themeSwitchTooltip", { theme })}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 28, height: 28, borderRadius: 7, border: "none",
-                background: "var(--card)", color: "var(--theme-icon-color, var(--text-2))",
-                cursor: "pointer", flexShrink: 0,
-              }}
-            >
-              {DARK_THEME_IDS.has(theme) ? <IconMoon /> : <IconSun />}
-            </button>
+            <div ref={themeMenuRef} style={{ position: "relative", flexShrink: 0 }}>
+              <button
+                onClick={() => setThemeMenuOpen((v) => !v)}
+                title={t("themeSwitchTooltip", { theme })}
+                aria-haspopup="menu"
+                aria-expanded={themeMenuOpen}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 28, height: 28, padding: 0, borderRadius: "9999px", border: "none",
+                  background: "var(--card)",
+                  cursor: "pointer", flexShrink: 0,
+                }}
+              >
+                <span
+                  data-theme={theme}
+                  aria-hidden="true"
+                  style={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: "9999px",
+                    border: "1px solid var(--border)",
+                    backgroundColor: "var(--bg)",
+                    boxShadow: "0 1px 2px rgba(0, 0, 0, 0.18)",
+                    display: "block",
+                  }}
+                />
+              </button>
+
+              {themeMenuOpen && (
+                <div
+                  role="menu"
+                  aria-label="Theme picker"
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 8px)",
+                    left: 0,
+                    zIndex: 30,
+                    width: 240,
+                    maxHeight: 320,
+                    overflow: "hidden",
+                    borderRadius: 12,
+                    border: "1px solid var(--border-hover)",
+                    background: "var(--surface)",
+                    boxShadow: "0 16px 40px rgba(0,0,0,0.35)",
+                  }}
+                >
+                  <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "10px 12px",
+                    borderBottom: "1px solid var(--border)",
+                  }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                        Theme
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+                        {themeLabel}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setTheme((t) => nextTheme(t))}
+                      style={{
+                        border: "none",
+                        borderRadius: 6,
+                        padding: "5px 8px",
+                        background: "var(--border)",
+                        color: "var(--text-2)",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Next
+                    </button>
+                  </div>
+                  <div style={{ height: 264, overflowY: "auto", overflowX: "hidden", padding: 8 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 24px)", gap: 6, justifyContent: "start" }}>
+                      {THEME_CYCLE.map((candidate) => {
+                        const active = candidate === theme;
+                        return (
+                          <button
+                            key={candidate}
+                            onClick={() => {
+                              setTheme(candidate);
+                              setThemeMenuOpen(false);
+                            }}
+                            aria-label={`Switch theme to ${formatThemeLabel(candidate)}`}
+                            title={formatThemeLabel(candidate)}
+                            aria-pressed={active}
+                            data-theme={candidate}
+                            style={{
+                              position: "relative",
+                              width: 24,
+                              height: 24,
+                              padding: 0,
+                              borderRadius: "9999px",
+                              border: "1px solid var(--border)",
+                              backgroundColor: "var(--bg)",
+                              boxShadow: active ? "0 0 0 2px #3b82f6" : "0 1px 2px rgba(0, 0, 0, 0.18)",
+                              transform: active ? "scale(1.1)" : "scale(1)",
+                              cursor: "pointer",
+                              transition: "transform 150ms ease, box-shadow 150ms ease",
+                            }}
+                          >
+                            {active && (
+                              <span style={{
+                                position: "absolute",
+                                inset: 0,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                fontSize: 10,
+                                fontWeight: 700,
+                                color: "var(--text)",
+                                pointerEvents: "none",
+                              }}>
+                                ✓
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
             <button
               onClick={handleCollapseTabs}
               title={t("collapseTabsTooltip")}
@@ -2408,10 +2571,54 @@ export default function App() {
 
             <div style={{ flex: 1 }} />
 
-            <input type="text" placeholder={t("searchPlaceholder")} value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ background: "var(--card)", border: "1px solid var(--border-hover)", borderRadius: 7, padding: "6px 12px", color: "var(--text)", fontSize: 13, outline: "none", width: 220 }}
-            />
+            <div style={{ position: "relative", width: 220, flexShrink: 0 }}>
+              <input
+                type="text"
+                placeholder={t("searchPlaceholder")}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{
+                  background: "var(--card)",
+                  border: "1px solid var(--border-hover)",
+                  borderRadius: 7,
+                  padding: "6px 30px 6px 12px",
+                  color: "var(--text)",
+                  fontSize: 13,
+                  outline: "none",
+                  width: "100%",
+                }}
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  aria-label="Clear search"
+                  title="Clear search"
+                  style={{
+                    position: "absolute",
+                    top: "50%",
+                    right: 8,
+                    transform: "translateY(-50%)",
+                    width: 18,
+                    height: 18,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    border: "none",
+                    borderRadius: 9999,
+                    background: "transparent",
+                    color: "var(--text-3)",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M2 2L10 10" />
+                    <path d="M10 2L2 10" />
+                  </svg>
+                </button>
+              )}
+            </div>
 
             <span style={{ fontSize: 12, color: "var(--text-4)", minWidth: 62, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>
               {sorted.length.toLocaleString()}
@@ -2536,7 +2743,7 @@ export default function App() {
 
 
           {/* Content */}
-          <main style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+          <main style={{ flex: 1, overflowY: "auto", padding: effectiveGroupByDate ? "0 16px 16px 16px" : "16px 16px 16px 16px" }}>
             {sorted.length === 0 ? (
               <Empty onAdd={() => setModal({ mode: "add" })} />
             ) : displayMode === "list" ? (
@@ -2834,6 +3041,8 @@ export default function App() {
             onClick={() => {
               setShowAppPicker(false);
               setAppPickerError(null);
+              setAppSearch("");
+              setAppPickerSelection([]);
             }}
             style={{
               position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)",
@@ -2846,109 +3055,147 @@ export default function App() {
               style={{
                 background: "var(--card)", border: "1px solid var(--border-hover)",
                 borderRadius: 14, padding: 22, width: 700, maxWidth: "calc(100vw - 32px)",
-                maxHeight: "calc(100vh - 72px)", overflow: "auto",
+                maxHeight: "calc(100vh - 72px)", overflow: "hidden",
                 display: "flex", flexDirection: "column", gap: 14,
                 boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 2, background: "var(--card)" }}>
                 <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", margin: 0 }}>Add App Shortcut</h2>
-                <button
-                  onClick={() => setShowAppPicker(false)}
-                  style={{
-                    width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border-hover)",
-                    background: "var(--card)", color: "var(--text-3)", cursor: "pointer",
-                    fontSize: 15,
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-
-              <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-                <span style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>
-                  Custom (Paste URL)
-                </span>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <input
-                    type="text"
-                    value={customAppName}
-                    onChange={(e) => setCustomAppName(e.target.value)}
-                    placeholder="Name (optional)"
-                    style={{
-                      flex: "1 1 180px", minWidth: 180, background: "var(--bg)", border: "1px solid var(--border-hover)",
-                      borderRadius: 7, padding: "8px 10px", color: "var(--text)", fontSize: 13, outline: "none",
-                    }}
-                  />
-                  <input
-                    type="text"
-                    value={customAppUrl}
-                    onChange={(e) => setCustomAppUrl(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") void handleCustomAppAdd(); }}
-                    placeholder="https://example.com"
-                    style={{
-                      flex: "2 1 260px", minWidth: 240, background: "var(--bg)", border: "1px solid var(--border-hover)",
-                      borderRadius: 7, padding: "8px 10px", color: "var(--text)", fontSize: 13, outline: "none",
-                    }}
-                  />
-                  <input
-                    type="text"
-                    value={customAppIconUrl}
-                    onChange={(e) => setCustomAppIconUrl(e.target.value)}
-                    placeholder="Icon URL or local icon name (optional)"
-                    style={{
-                      flex: "2 1 260px", minWidth: 240, background: "var(--bg)", border: "1px solid var(--border-hover)",
-                      borderRadius: 7, padding: "8px 10px", color: "var(--text)", fontSize: 13, outline: "none",
-                    }}
-                  />
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <button
-                    onClick={() => { void handleCustomAppAdd(); }}
-                    disabled={addingCustomApp}
+                    onClick={confirmAppPickerSelection}
+                    disabled={appPickerSelection.length === 0}
                     style={{
-                      background: "#3b82f6", border: "none", borderRadius: 7, color: "#fff",
-                      fontSize: 13, fontWeight: 700, padding: "0 12px", height: 34,
-                      cursor: addingCustomApp ? "not-allowed" : "pointer", opacity: addingCustomApp ? 0.6 : 1,
+                      height: 28, padding: "0 12px", borderRadius: 7, border: "1px solid #3b82f6",
+                      background: "#3b82f6", color: "#fff", cursor: appPickerSelection.length === 0 ? "not-allowed" : "pointer",
+                      fontSize: 13, fontWeight: 700, opacity: appPickerSelection.length === 0 ? 0.6 : 1,
                     }}
                   >
-                    {addingCustomApp ? "Adding…" : "Add Custom"}
+                    Done
+                  </button>
+                  <button
+                    onClick={() => setShowAppPicker(false)}
+                    style={{
+                      width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border-hover)",
+                      background: "var(--card)", color: "var(--text-3)", cursor: "pointer",
+                      fontSize: 15,
+                    }}
+                  >
+                    ×
                   </button>
                 </div>
-                {appPickerError && (
-                  <span style={{ fontSize: 12, color: "#ef4444" }}>{appPickerError}</span>
-                )}
               </div>
 
-              {appCatalog.map((group) => (
-                <div key={group.group} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ flex: 1, overflowY: "auto", paddingRight: 2, display: "flex", flexDirection: "column", gap: 14 }}>
+                <input
+                  type="text"
+                  value={appSearch}
+                  onChange={(e) => setAppSearch(e.target.value)}
+                  placeholder="Search apps"
+                  style={{
+                    height: 34,
+                    width: "100%",
+                    background: "var(--bg)",
+                    border: "1px solid var(--border-hover)",
+                    borderRadius: 8,
+                    padding: "8px 12px",
+                    color: "var(--text)",
+                    fontSize: 13,
+                    outline: "none",
+                  }}
+                />
+
+                <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
                   <span style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>
-                    {group.group}
+                    Custom (Paste URL)
                   </span>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 }}>
-                    {group.apps.map((app) => {
-                      const alreadyAdded = appShortcuts.some((x) => x.id === app.id || normaliseUrlForDedupe(x.url) === normaliseUrlForDedupe(app.url));
-                      return (
-                        <button
-                          key={app.id}
-                          onClick={() => handlePresetAppAdd(app)}
-                          disabled={alreadyAdded}
-                          style={{
-                            display: "flex", alignItems: "center", gap: 8, height: 34,
-                            padding: "0 10px", borderRadius: 8,
-                            border: `1px solid ${alreadyAdded ? "var(--border)" : "var(--border-hover)"}`,
-                            background: alreadyAdded ? "var(--border)" : "var(--card)",
-                            color: alreadyAdded ? "var(--text-4)" : "var(--text-2)",
-                            cursor: alreadyAdded ? "not-allowed" : "pointer",
-                            fontSize: 12, fontWeight: 600, textAlign: "left",
-                          }}
-                        >
-                          <AppIcon app={app} width={16} height={15} radius={3} />
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{app.name}</span>
-                        </button>
-                      );
-                    })}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <input
+                      type="text"
+                      value={customAppName}
+                      onChange={(e) => setCustomAppName(e.target.value)}
+                      placeholder="Name (optional)"
+                      style={{
+                        flex: "1 1 180px", minWidth: 180, background: "var(--bg)", border: "1px solid var(--border-hover)",
+                        borderRadius: 7, padding: "8px 10px", color: "var(--text)", fontSize: 13, outline: "none",
+                      }}
+                    />
+                    <input
+                      type="text"
+                      value={customAppUrl}
+                      onChange={(e) => setCustomAppUrl(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") void handleCustomAppAdd(); }}
+                      placeholder="https://example.com"
+                      style={{
+                        flex: "2 1 260px", minWidth: 240, background: "var(--bg)", border: "1px solid var(--border-hover)",
+                        borderRadius: 7, padding: "8px 10px", color: "var(--text)", fontSize: 13, outline: "none",
+                      }}
+                    />
+                    <input
+                      type="text"
+                      value={customAppIconUrl}
+                      onChange={(e) => setCustomAppIconUrl(e.target.value)}
+                      placeholder="Icon URL or local icon name (optional)"
+                      style={{
+                        flex: "2 1 260px", minWidth: 240, background: "var(--bg)", border: "1px solid var(--border-hover)",
+                        borderRadius: 7, padding: "8px 10px", color: "var(--text)", fontSize: 13, outline: "none",
+                      }}
+                    />
+                    <button
+                      onClick={() => { void handleCustomAppAdd(); }}
+                      disabled={addingCustomApp}
+                      style={{
+                        background: "#3b82f6", border: "none", borderRadius: 7, color: "#fff",
+                        fontSize: 13, fontWeight: 700, padding: "0 12px", height: 34,
+                        cursor: addingCustomApp ? "not-allowed" : "pointer", opacity: addingCustomApp ? 0.6 : 1,
+                      }}
+                    >
+                      {addingCustomApp ? "Adding…" : "Add Custom"}
+                    </button>
                   </div>
+                  {appPickerError && (
+                    <span style={{ fontSize: 12, color: "#ef4444" }}>{appPickerError}</span>
+                  )}
                 </div>
-              ))}
+
+                {filteredAppCatalog.map((group) => (
+                  <div key={group.group} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <span style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>
+                      {group.group}
+                    </span>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 }}>
+                      {group.apps.map((app) => {
+                        const alreadyAdded = appShortcuts.some((x) => x.id === app.id || normaliseUrlForDedupe(x.url) === normaliseUrlForDedupe(app.url));
+                        const selected = appPickerSelection.includes(app.id);
+                        return (
+                          <button
+                            key={app.id}
+                            onClick={() => {
+                              if (alreadyAdded) return;
+                              toggleAppPickerSelection(app);
+                            }}
+                            disabled={alreadyAdded}
+                            style={{
+                              display: "flex", alignItems: "center", gap: 8, height: 34,
+                              padding: "0 10px", borderRadius: 8,
+                              border: `1px solid ${alreadyAdded ? "var(--border)" : selected ? "#3b82f6" : "var(--border-hover)"}`,
+                              background: alreadyAdded ? "var(--border)" : selected ? "#3b82f620" : "var(--card)",
+                              color: alreadyAdded ? "var(--text-4)" : "var(--text-2)",
+                              cursor: alreadyAdded ? "not-allowed" : "pointer",
+                              fontSize: 12, fontWeight: 600, textAlign: "left",
+                            }}
+                          >
+                            <AppIcon app={app} width={16} height={15} radius={3} />
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{app.name}</span>
+                            {selected && !alreadyAdded && <span style={{ color: "#3b82f6", fontSize: 12, flexShrink: 0 }}>✓</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -3278,6 +3525,7 @@ function TagChip({ label, count, active, color, onClick, onClear, vertical = fal
 function AppIcon({ app, width, height, radius }: { app: Pick<AppShortcut, "url" | "icon" | "iconUrl">; width: number; height: number; radius: number }) {
   const sources = appIconCandidates(app);
   const [idx, setIdx] = useState(0);
+  const [hovered, setHovered] = useState(false);
   const sourceKey = `${app.url}|${app.icon ?? ""}|${app.iconUrl ?? ""}`;
 
   useEffect(() => {
@@ -3288,6 +3536,8 @@ function AppIcon({ app, width, height, radius }: { app: Pick<AppShortcut, "url" 
 
   return (
     <span
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         width,
         height,
@@ -3298,6 +3548,9 @@ function AppIcon({ app, width, height, radius }: { app: Pick<AppShortcut, "url" 
         alignItems: "center",
         justifyContent: "center",
         overflow: "hidden",
+        cursor: "pointer",
+        transform: hovered ? "scale(1.06)" : "scale(1)",
+        transition: "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)",
       }}
     >
       <img
@@ -3313,6 +3566,8 @@ function AppIcon({ app, width, height, radius }: { app: Pick<AppShortcut, "url" 
           objectPosition: "center",
           maxWidth: "100%",
           maxHeight: "100%",
+          transform: hovered ? "scale(1.06)" : "scale(1)",
+          transition: "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)",
         }}
         onError={() => {
           setIdx((i) => Math.min(i + 1, sources.length - 1));
@@ -3463,30 +3718,6 @@ function IconCalendar() {
       <line x1="8" y1="17" x2="8" y2="17" />
       <line x1="12" y1="17" x2="12" y2="17" />
       <line x1="16" y1="17" x2="16" y2="17" />
-    </svg>
-  );
-}
-
-function IconSun() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="5" fill="none" />
-      <line x1="12" y1="1" x2="12" y2="3" />
-      <line x1="12" y1="21" x2="12" y2="23" />
-      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-      <line x1="1" y1="12" x2="3" y2="12" />
-      <line x1="21" y1="12" x2="23" y2="12" />
-      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-    </svg>
-  );
-}
-
-function IconMoon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
     </svg>
   );
 }
@@ -3662,58 +3893,50 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onCle
             zIndex: 3000,
           }}
         >
-          <button
+          <TagContextMenuItem
             onClick={() => {
               onChangeColor();
               setContextMenu(null);
             }}
-            style={tagContextMenuBtn}
           >
             Change Color
-          </button>
-          <button
+          </TagContextMenuItem>
+          <TagContextMenuItem
             onClick={() => {
               setEditing(true);
               setContextMenu(null);
             }}
-            style={tagContextMenuBtn}
           >
             Rename Tag
-          </button>
-          <button
+          </TagContextMenuItem>
+          <TagContextMenuItem
             onClick={() => {
               onClear();
               setContextMenu(null);
             }}
-            style={tagContextMenuBtn}
           >
             Clear Tag
-          </button>
-          <button
+          </TagContextMenuItem>
+          <TagContextMenuItem
             onClick={() => {
               onToggleCleanupBypass();
               setContextMenu(null);
             }}
-            style={{
-              ...tagContextMenuBtn,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
+            checked={cleanupBypassed}
+            layout="space-between"
           >
-            <span>Bypass Clean Up</span>
-            <span style={{ width: 16, textAlign: "right" }}>{cleanupBypassed ? "✓" : ""}</span>
-          </button>
+            Bypass Clean Up
+          </TagContextMenuItem>
           <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
-          <button
+          <TagContextMenuItem
             onClick={() => {
               onDelete();
               setContextMenu(null);
             }}
-            style={tagContextMenuBtn}
+            danger
           >
             Delete Tag
-          </button>
+          </TagContextMenuItem>
         </div>
       )}
     </div>
@@ -3732,6 +3955,42 @@ const tagContextMenuBtn: React.CSSProperties = {
   fontSize: 13,
   cursor: "pointer",
 };
+
+function TagContextMenuItem({
+  children,
+  onClick,
+  checked = false,
+  danger = false,
+  layout = "left",
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  checked?: boolean;
+  danger?: boolean;
+  layout?: "left" | "space-between";
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        ...tagContextMenuBtn,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: layout,
+        background: hovered ? (danger ? "rgba(239,68,68,0.12)" : "var(--border)") : "transparent",
+        color: danger ? "#ef4444" : "var(--text-2)",
+      }}
+    >
+      <span>{children}</span>
+      {layout === "space-between" && (
+        <span style={{ width: 16, textAlign: "right" }}>{checked ? "✓" : ""}</span>
+      )}
+    </button>
+  );
+}
 
 const appContextMenuBtn: React.CSSProperties = {
   display: "block",
