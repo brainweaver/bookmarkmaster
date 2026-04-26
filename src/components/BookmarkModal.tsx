@@ -18,7 +18,6 @@ export default function BookmarkModal({ initial, prefill, existingTags, onSave, 
   const [favicon, setFavicon] = useState(initial?.favicon ?? prefill?.favicon ?? "");
   const [description, setDescription] = useState(initial?.description ?? prefill?.description ?? "");
   const [tags, setTags] = useState<string[]>(visibleTags(initial?.tags ?? []));
-  const [ranking, setRanking] = useState<number>(initial?.ranking ?? 0);
   const [tagInput, setTagInput] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -94,7 +93,6 @@ export default function BookmarkModal({ initial, prefill, existingTags, onSave, 
       favicon,
       description: description.trim() || undefined,
       tags: [...tags, ...systemTags],
-      ranking: ranking || undefined,
     });
   };
 
@@ -320,18 +318,6 @@ export default function BookmarkModal({ initial, prefill, existingTags, onSave, 
               </div>
             )}
           </div>
-        </Field>
-
-        {/* Ranking */}
-        <Field label="Ranking" hint="higher number = sorted first">
-          <input
-            type="number"
-            min={0}
-            step={1}
-            value={ranking}
-            onChange={(e) => setRanking(Math.max(0, Math.floor(Number(e.target.value))))}
-            style={inputStyle(false)}
-          />
         </Field>
 
         {/* Actions */}

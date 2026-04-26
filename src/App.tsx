@@ -2743,7 +2743,6 @@ export default function App() {
             >
               <option value="date">{t("dateAdded")}</option>
               <option value="name">{t("nameAZ")}</option>
-              <option value="ranking">{t("ranking")}</option>
             </select>
 
             <div ref={dataMenuRef} style={{ position: "relative" }}>
