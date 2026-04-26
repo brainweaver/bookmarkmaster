@@ -36,9 +36,9 @@ body { overflow: hidden; }
   --sun-fill:     #ffd35f;
   --theme-icon-color: #6b7280;
   --bookmark-card-shadow: 0 1px 8px rgba(15, 23, 42, 0.08);
-  --bookmark-card-action-bg: rgba(255,255,255,0.96);
-  --bookmark-card-action-hover-bg: #eef2f7;
-  --bookmark-card-action-border: 1px solid var(--border);
+  --bookmark-card-action-bg: #ffffff;
+  --bookmark-card-action-hover-bg: #ffffff;
+  --bookmark-card-action-border: 1px solid #d1d5db;
   --bookmark-card-action-color: #475569;
 }
 

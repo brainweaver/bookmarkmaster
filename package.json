@@ -4,7 +4,7 @@
   "version": "1.0.2",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "./dev.sh",
     "build": "tsc -b && vite build",
     "test": "node --test tests/*.test.mjs",
     "build:ext": "tsc -b && vite build && echo '\nExtension built to dist/ \u2014 load as unpacked extension in chrome://extensions'",

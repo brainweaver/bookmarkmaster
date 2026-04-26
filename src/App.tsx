@@ -3647,6 +3647,7 @@ function ToggleBtn({ active, onClick, title, icon, disabled }: {
 function Empty({ onAdd }: { onAdd: () => void }) {
   return (
     <div style={{ textAlign: "center", color: "var(--text-4)", marginTop: 80 }}>
+      <img src="/no-bookmarks-found.png" alt="" width={100} height={100} style={{ width: 100, height: 100, display: "block", margin: "0 auto 16px" }} />
       <div style={{ fontSize: 15, marginBottom: 12 }}>No bookmarks found</div>
       <button onClick={onAdd} style={{
         background: "#3b82f620", border: "1px solid #3b82f640",
