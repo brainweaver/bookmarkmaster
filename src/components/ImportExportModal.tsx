@@ -510,28 +510,48 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
 
           <Row>
             <ActionBtn
-              icon="⭐"
+              icon={
+                <svg width="32" height="32" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <rect width="48" height="48" rx="24" fill="#FEE4E2" />
+                  <path d="M17.6 11.2C15.835 11.2 14.4 12.635 14.4 14.4V35.1999C14.4 35.7749 14.71 36.3099 15.21 36.5899C15.71 36.8699 16.325 36.865 16.82 36.57L24 32.2649L31.175 36.57C31.67 36.865 32.285 36.8749 32.785 36.5899C33.285 36.3049 33.6 35.7749 33.6 35.1999V14.4C33.6 12.635 32.165 11.2 30.4 11.2H17.6Z" fill="#F04438" />
+                </svg>
+              }
               label="From Chrome Bookmarks"
               sub="Import directly from this browser"
               onClick={handleImportChrome}
               disabled={isBusy}
             />
             <ActionBtn
-              icon="🌐"
+              icon={
+                <svg width="32" height="32" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <rect width="48" height="48" rx="24" fill="#E0F2FE" />
+                  <path d="M28.795 25.2H19.25C19.395 28.425 20.11 31.395 21.125 33.57C21.695 34.795 22.31 35.66 22.88 36.19C23.44 36.715 23.825 36.8 24.025 36.8C24.225 36.8 24.61 36.715 25.17 36.19C25.74 35.66 26.355 34.79 26.925 33.57C27.94 31.395 28.655 28.425 28.8 25.2H28.795ZM19.245 22.8H28.79C28.65 19.575 27.935 16.605 26.92 14.43C26.35 13.21 25.735 12.34 25.165 11.81C24.605 11.285 24.22 11.2 24.02 11.2C23.82 11.2 23.435 11.285 22.875 11.81C22.305 12.34 21.69 13.21 21.12 14.43C20.105 16.605 19.39 19.575 19.245 22.8ZM16.845 22.8C17.02 18.52 18.125 14.545 19.74 11.935C15.135 13.565 11.745 17.76 11.275 22.8H16.845ZM11.275 25.2C11.745 30.24 15.135 34.435 19.74 36.065C18.125 33.455 17.02 29.48 16.845 25.2H11.275ZM31.195 25.2C31.02 29.48 29.915 33.455 28.3 36.065C32.905 34.43 36.295 30.24 36.765 25.2H31.195ZM36.765 22.8C36.295 17.76 32.905 13.565 28.3 11.935C29.915 14.545 31.02 18.52 31.195 22.8H36.765Z" fill="#0BA5EC" />
+                </svg>
+              }
               label="From Browser Export"
               sub="Auto-detect from browser export file"
               onClick={() => openImportFilePicker("browser")}
               disabled={isBusy}
             />
             <ActionBtn
-              icon="📂"
+              icon={
+                <svg width="32" height="32" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <rect width="48" height="48" rx="24" fill="#FDEAD7" />
+                  <path d="M14.4 14.4C14.4 12.635 15.835 11.2 17.6 11.2H25.075C25.925 11.2 26.74 11.535 27.34 12.135L32.665 17.465C33.265 18.065 33.6 18.88 33.6 19.73V33.6C33.6 35.365 32.165 36.8 30.4 36.8H17.6C15.835 36.8 14.4 35.365 14.4 33.6V14.4ZM24.8 14.125V18.8C24.8 19.465 25.335 20 26 20H30.675L24.8 14.125ZM22.11 25.98C22.54 25.475 22.485 24.72 21.98 24.29C21.475 23.86 20.72 23.915 20.29 24.42L17.89 27.22C17.505 27.67 17.505 28.33 17.89 28.78L20.29 31.58C20.72 32.085 21.48 32.14 21.98 31.71C22.48 31.28 22.54 30.52 22.11 30.02L20.38 28L22.11 25.98ZM27.71 24.42C27.28 23.915 26.52 23.86 26.02 24.29C25.52 24.72 25.46 25.48 25.89 25.98L27.62 28L25.89 30.02C25.46 30.525 25.515 31.28 26.02 31.71C26.525 32.14 27.28 32.085 27.71 31.58L30.11 28.78C30.495 28.33 30.495 27.67 30.11 27.22L27.71 24.42Z" fill="#F79009" />
+                </svg>
+              }
               label="From File (Json,HTML,or TXT)"
               sub="Auto-detect JSON, HTML, or plain URLs"
               onClick={() => openImportFilePicker("file")}
               disabled={isBusy}
             />
             <ActionBtn
-              icon="📋"
+              icon={
+                <svg width="32" height="32" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <rect width="48" height="48" rx="24" fill="#DCFAE6" />
+                  <path d="M22.4 11.2C20.635 11.2 19.2 12.635 19.2 14.4V27.2C19.2 28.965 20.635 30.4 22.4 30.4H32C33.765 30.4 35.2 28.965 35.2 27.2V17.17C35.2 16.3 34.845 15.465 34.215 14.86L31.33 12.09C30.735 11.52 29.94 11.2 29.115 11.2H22.4ZM16 17.6C14.235 17.6 12.8 19.035 12.8 20.8V33.6C12.8 35.365 14.235 36.8 16 36.8H25.6C27.365 36.8 28.8 35.365 28.8 33.6V32.8H25.6V33.6H16V20.8H16.8V17.6H16Z" fill="#17B26A" />
+                </svg>
+              }
               label="From Clipboard"
               sub="Paste URLs, one per line"
               onClick={() => setShowTextPaste((v) => !v)}
@@ -659,35 +679,60 @@ export default function ImportExportModal({ bookmarks, onImport, onClose, select
           </div>
           <Row>
             <ActionBtn
-              icon="🔖"
+              icon={
+                <svg width="32" height="32" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <rect width="48" height="48" rx="24" fill="#FEE4E2" />
+                  <path d="M17.6 11.2C15.835 11.2 14.4 12.635 14.4 14.4V35.1999C14.4 35.7749 14.71 36.3099 15.21 36.5899C15.71 36.8699 16.325 36.865 16.82 36.57L24 32.2649L31.175 36.57C31.67 36.865 32.285 36.8749 32.785 36.5899C33.285 36.3049 33.6 35.7749 33.6 35.1999V14.4C33.6 12.635 32.165 11.2 30.4 11.2H17.6Z" fill="#F04438" />
+                </svg>
+              }
               label="To Chrome Bookmarks"
               sub="Adds to Other Bookmarks"
               onClick={handleExportChrome}
               disabled={isBusy || exportBookmarks.length === 0}
             />
             <ActionBtn
-              icon="🌐"
+              icon={
+                <svg width="32" height="32" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <rect width="48" height="48" rx="24" fill="#E0F2FE" />
+                  <path d="M28.795 25.2H19.25C19.395 28.425 20.11 31.395 21.125 33.57C21.695 34.795 22.31 35.66 22.88 36.19C23.44 36.715 23.825 36.8 24.025 36.8C24.225 36.8 24.61 36.715 25.17 36.19C25.74 35.66 26.355 34.79 26.925 33.57C27.94 31.395 28.655 28.425 28.8 25.2H28.795ZM19.245 22.8H28.79C28.65 19.575 27.935 16.605 26.92 14.43C26.35 13.21 25.735 12.34 25.165 11.81C24.605 11.285 24.22 11.2 24.02 11.2C23.82 11.2 23.435 11.285 22.875 11.81C22.305 12.34 21.69 13.21 21.12 14.43C20.105 16.605 19.39 19.575 19.245 22.8ZM16.845 22.8C17.02 18.52 18.125 14.545 19.74 11.935C15.135 13.565 11.745 17.76 11.275 22.8H16.845ZM11.275 25.2C11.745 30.24 15.135 34.435 19.74 36.065C18.125 33.455 17.02 29.48 16.845 25.2H11.275ZM31.195 25.2C31.02 29.48 29.915 33.455 28.3 36.065C32.905 34.43 36.295 30.24 36.765 25.2H31.195ZM36.765 22.8C36.295 17.76 32.905 13.565 28.3 11.935C29.915 14.545 31.02 18.52 31.195 22.8H36.765Z" fill="#0BA5EC" />
+                </svg>
+              }
               label="Export To Browsers"
               sub="Browser-compatible bookmarks HTML"
               onClick={handleExportToBrowsers}
               disabled={isBusy || exportBookmarks.length === 0}
             />
             <ActionBtn
-              icon="{}"
+              icon={
+                <svg width="32" height="32" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <rect width="48" height="48" rx="24" fill="#ECE9FE" />
+                  <path d="M14.4 14.4C14.4 12.635 15.835 11.2 17.6 11.2H25.075C25.925 11.2 26.74 11.535 27.34 12.135L32.665 17.465C33.265 18.065 33.6 18.88 33.6 19.73V33.6C33.6 35.365 32.165 36.8 30.4 36.8H17.6C15.835 36.8 14.4 35.365 14.4 33.6V14.4ZM24.8 14.125V18.8C24.8 19.465 25.335 20 26 20H30.675L24.8 14.125ZM23.15 33.25C23.62 33.72 24.38 33.72 24.845 33.25L28.045 30.05C28.515 29.58 28.515 28.82 28.045 28.355C27.575 27.89 26.815 27.885 26.35 28.355L25.2 29.505V25.2C25.2 24.535 24.665 24 24 24C23.335 24 22.8 24.535 22.8 25.2V29.505L21.65 28.355C21.18 27.885 20.42 27.885 19.955 28.355C19.49 28.825 19.485 29.585 19.955 30.05L23.155 33.25H23.15Z" fill="#875BF7" />
+                </svg>
+              }
               label="Download As Json"
               sub="Full data with tags & descriptions"
               onClick={handleExportJSON}
               disabled={isBusy || exportBookmarks.length === 0}
             />
             <ActionBtn
-              icon="📄"
+              icon={
+                <svg width="32" height="32" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <rect width="48" height="48" rx="24" fill="#FDEAD7" />
+                  <path d="M14.4 14.4C14.4 12.635 15.835 11.2 17.6 11.2H25.075C25.925 11.2 26.74 11.535 27.34 12.135L32.665 17.465C33.265 18.065 33.6 18.88 33.6 19.73V33.6C33.6 35.365 32.165 36.8 30.4 36.8H17.6C15.835 36.8 14.4 35.365 14.4 33.6V14.4ZM24.8 14.125V18.8C24.8 19.465 25.335 20 26 20H30.675L24.8 14.125ZM22.11 25.98C22.54 25.475 22.485 24.72 21.98 24.29C21.475 23.86 20.72 23.915 20.29 24.42L17.89 27.22C17.505 27.67 17.505 28.33 17.89 28.78L20.29 31.58C20.72 32.085 21.48 32.14 21.98 31.71C22.48 31.28 22.54 30.52 22.11 30.02L20.38 28L22.11 25.98ZM27.71 24.42C27.28 23.915 26.52 23.86 26.02 24.29C25.52 24.72 25.46 25.48 25.89 25.98L27.62 28L25.89 30.02C25.46 30.525 25.515 31.28 26.02 31.71C26.525 32.14 27.28 32.085 27.71 31.58L30.11 28.78C30.495 28.33 30.495 27.67 30.11 27.22L27.71 24.42Z" fill="#F79009" />
+                </svg>
+              }
               label="Download As Text"
               sub="One URL per line"
               onClick={handleExportTXT}
               disabled={isBusy || exportBookmarks.length === 0}
             />
             <ActionBtn
-              icon="⎘"
+              icon={
+                <svg width="32" height="32" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <rect width="48" height="48" rx="24" fill="#DCFAE6" />
+                  <path d="M22.4 11.2C20.635 11.2 19.2 12.635 19.2 14.4V27.2C19.2 28.965 20.635 30.4 22.4 30.4H32C33.765 30.4 35.2 28.965 35.2 27.2V17.17C35.2 16.3 34.845 15.465 34.215 14.86L31.33 12.09C30.735 11.52 29.94 11.2 29.115 11.2H22.4ZM16 17.6C14.235 17.6 12.8 19.035 12.8 20.8V33.6C12.8 35.365 14.235 36.8 16 36.8H25.6C27.365 36.8 28.8 35.365 28.8 33.6V32.8H25.6V33.6H16V20.8H16.8V17.6H16Z" fill="#17B26A" />
+                </svg>
+              }
               label="Copy to Clipboard"
               sub="Copy URLs to clipboard"
               onClick={handleExportCopy}
@@ -715,7 +760,7 @@ function Row({ children }: { children: React.ReactNode }) {
 function ActionBtn({
   icon, label, sub, onClick, disabled,
 }: {
-  icon: string; label: string; sub: string; onClick: () => void; disabled?: boolean;
+  icon: React.ReactNode; label: string; sub: string; onClick: () => void; disabled?: boolean;
 }) {
   return (
     <button
@@ -737,7 +782,7 @@ function ActionBtn({
         (e.currentTarget as HTMLElement).style.borderColor = "var(--border-hover)";
       }}
     >
-      <span style={{ fontSize: 18, lineHeight: 1 }}>{icon}</span>
+      <span style={{ width: 32, height: 32, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{icon}</span>
       <span style={{ fontSize: 13, fontWeight: 600 }}>{label}</span>
       <span style={{ fontSize: 11, color: "var(--text-3)" }}>{sub}</span>
     </button>

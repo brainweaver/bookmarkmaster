@@ -20,6 +20,7 @@ body { overflow: hidden; }
   --bookmark-card-action-hover-bg: var(--border-hover);
   --bookmark-card-action-border: none;
   --bookmark-card-action-color: var(--text-2);
+  --sidebar-new-btn-hover-bg: rgba(0,0,0,0.2);
 }
 
 [data-theme="light"] {
@@ -40,6 +41,7 @@ body { overflow: hidden; }
   --bookmark-card-action-hover-bg: #ffffff;
   --bookmark-card-action-border: 1px solid #d1d5db;
   --bookmark-card-action-color: #475569;
+  --sidebar-new-btn-hover-bg: rgba(0,0,0,0.1);
 }
 
 [data-theme="soft-ivory"] {

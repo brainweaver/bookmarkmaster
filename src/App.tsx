@@ -906,6 +906,10 @@ export default function App() {
   const [, setTagColorVersion] = useState(0);
   const [tagOrder, setTagOrder] = useState<string[]>(loadTagOrder);
   const [cleanupBypassTags, setCleanupBypassTags] = useState<string[]>(loadCleanupBypassTags);
+  const [sidebarTagContextMenu, setSidebarTagContextMenu] = useState<{ tag: string; x: number; y: number; openUp: boolean } | null>(null);
+  const [sidebarTagEditMode, setSidebarTagEditMode] = useState(false);
+  const [selectedSidebarTags, setSelectedSidebarTags] = useState<string[]>([]);
+  const [pendingBulkDeleteTags, setPendingBulkDeleteTags] = useState<string[] | null>(null);
   const [appCatalog, setAppCatalog] = useState<AppGroup[]>(loadAppCatalog);
   const [appShortcuts, setAppShortcuts] = useState<AppShortcut[]>(loadAppShortcuts);
   const [showAppPicker, setShowAppPicker] = useState(false);
@@ -1496,6 +1500,42 @@ export default function App() {
     next.splice(from, 1);
     next.splice(to, 0, draggedTag);
     setTagOrder(next);
+  };
+
+  const exitSidebarTagEditMode = () => {
+    setSidebarTagEditMode(false);
+    setSelectedSidebarTags([]);
+    setSidebarTagContextMenu(null);
+  };
+
+  const toggleSidebarTagEditMode = () => {
+    setSidebarTagContextMenu(null);
+    setSidebarTagEditMode((prev) => {
+      const next = !prev;
+      if (!next) setSelectedSidebarTags([]);
+      return next;
+    });
+  };
+
+  const toggleSelectedSidebarTag = (tag: string) => {
+    setSelectedSidebarTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
+  };
+
+  const confirmBulkDeleteSidebarTags = () => {
+    if (selectedSidebarTags.length === 0) return;
+    setPendingBulkDeleteTags([...selectedSidebarTags]);
+  };
+
+  const deleteBulkSidebarTags = (tagsToDelete: string[]) => {
+    const tagSet = new Set(tagsToDelete);
+    tagsToDelete.forEach((tag) => deleteTag(tag));
+    setTagOrder((prev) => prev.filter((tag) => !tagSet.has(tag)));
+    setCleanupBypassTags((prev) => prev.filter((tag) => !tagSet.has(tag)));
+    if (selectedTag && tagSet.has(selectedTag)) setSelectedTag(null);
+    exitSidebarTagEditMode();
+    setPendingBulkDeleteTags(null);
   };
 
   const handleRenameSidebarTag = (oldName: string, newName: string) => {
@@ -2106,17 +2146,12 @@ export default function App() {
               <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", letterSpacing: "0.07em", textTransform: "uppercase", flex: 1 }}>
                 Apps
               </span>
-              <button
+              <SidebarNewButton
                 onClick={() => { setShowAppPicker(true); setAppPickerError(null); setAppSearch(""); }}
                 title="Add app shortcut"
-                style={{
-                  background: "none", border: "1px solid var(--border-hover)", borderRadius: 5,
-                  color: "var(--text-3)", fontSize: 11, fontWeight: 600, cursor: "pointer",
-                  padding: "2px 7px", lineHeight: 1.4,
-                }}
               >
                 + New
-              </button>
+              </SidebarNewButton>
             </div>
             <div
               style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-start", gap: 10, padding: "0 10px 12px 14px" }}
@@ -2253,21 +2288,16 @@ export default function App() {
               }}
             />
 
-            <div style={{ padding: "0 8px 14px 16px", display: "flex", alignItems: "center" }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", letterSpacing: "0.07em", textTransform: "uppercase", flex: 1 }}>
+            <div style={{ padding: "0 8px 14px 16px", display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", letterSpacing: "0.07em", textTransform: "uppercase", flex: 1 }}>
                 {t("tags")}
               </span>
-              <button
+              <SidebarNewButton
                 onClick={() => { setNewTagInput(""); setTimeout(() => newTagRef.current?.focus(), 50); }}
                 title={t("createNewTag")}
-                style={{
-                  background: "none", border: "1px solid var(--border-hover)", borderRadius: 5,
-                  color: "var(--text-3)", fontSize: 11, fontWeight: 600, cursor: "pointer",
-                  padding: "2px 7px", lineHeight: 1.4,
-                }}
               >
                 {t("newShort")}
-              </button>
+              </SidebarNewButton>
             </div>
             {newTagInput !== null && (
               <div style={{ margin: "0 8px 8px", display: "flex", alignItems: "center", gap: 4 }}>
@@ -2317,6 +2347,61 @@ export default function App() {
               onClear={handleClearNotReachable}
               vertical
             />
+            <div style={{ margin: "8px 8px 8px 16px", display: "flex", alignItems: "center", gap: 6, width: "calc(100% - 24px)" }}>
+              {sidebarTagEditMode && selectedSidebarTags.length > 0 ? (
+                <>
+                  <button
+                    onClick={confirmBulkDeleteSidebarTags}
+                    style={{
+                      background: "#ef444420",
+                      border: "1px solid #ef444440",
+                      borderRadius: 5,
+                      color: "#ef4444",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      padding: "2px 7px",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    Delete
+                  </button>
+                  <button
+                    onClick={exitSidebarTagEditMode}
+                    style={{
+                      background: "none",
+                      border: "1px solid var(--border-hover)",
+                      borderRadius: 5,
+                      color: "var(--text-3)",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      padding: "2px 7px",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <div style={{ flex: 1 }} />
+                  <SidebarNewButton
+                    onClick={toggleSidebarTagEditMode}
+                    title="Edit tags"
+                  >
+                    Done
+                  </SidebarNewButton>
+                </>
+              ) : (
+                <>
+                  <div style={{ flex: 1 }} />
+                  <SidebarNewButton
+                    onClick={toggleSidebarTagEditMode}
+                    title="Edit tags"
+                  >
+                    {sidebarTagEditMode ? "Done" : "Edit"}
+                  </SidebarNewButton>
+                </>
+              )}
+            </div>
             <div style={{ height: 6 }} />
             {orderedSidebarTags.map((tag) => {
               const count = bookmarks.filter((b) => b.tags.includes(tag)).length;
@@ -2326,7 +2411,11 @@ export default function App() {
                   tag={tag}
                   count={count}
                   active={selectedTag === tag}
+                  editMode={sidebarTagEditMode}
+                  selected={selectedSidebarTags.includes(tag)}
+                  theme={theme}
                   onSelect={() => setSelectedTag(selectedTag === tag ? null : tag)}
+                  onToggleSelect={() => toggleSelectedSidebarTag(tag)}
                   onRename={(newName) => handleRenameSidebarTag(tag, newName)}
                   onDelete={() => setPendingTagDelete(tag)}
                   onClear={() => clearTag(tag)}
@@ -2344,6 +2433,9 @@ export default function App() {
                   }}
                   onBookmarkDrop={(bookmarkId) => handleBookmarkDropOnTag(bookmarkId, tag)}
                   onTagReorder={handleReorderSidebarTag}
+                  activeContextMenu={sidebarTagContextMenu?.tag === tag ? sidebarTagContextMenu : null}
+                  onOpenContextMenu={(x, y, openUp) => setSidebarTagContextMenu({ tag, x, y, openUp })}
+                  onCloseContextMenu={() => setSidebarTagContextMenu(null)}
                 />
               );
             })}
@@ -2710,20 +2802,74 @@ export default function App() {
                   minWidth: 160, boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
                 }}>
                   <DataMenuItem
-                    icon={<img src="/broom.png" alt="" style={{ width: 17, height: 17, opacity: 0.65, filter: "var(--icon-filter)" }} />}
+                    icon={
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M22.4475 1.55249C21.9788 1.08374 21.2175 1.08374 20.7488 1.55249L13.5488 8.75249L12.9563 8.15999C12.3863 7.58999 11.5125 7.46999 10.8075 7.85999L9.58876 8.53499L15.4575 14.4037L16.1325 13.185C16.5225 12.4837 16.3988 11.6062 15.8325 11.0362L15.24 10.4437L22.44 3.24374C22.9088 2.77499 22.9088 2.01374 22.44 1.54499L22.4475 1.55249ZM8.23126 9.29249L1.81501 12.8587C1.43626 13.0687 1.20001 13.47 1.20001 13.905C1.20001 14.22 1.32751 14.5275 1.54876 14.7487L3.16876 16.3687C3.24751 16.4475 3.36751 16.4775 3.47626 16.44L5.43001 15.7875C5.66626 15.7087 5.88751 15.9337 5.80876 16.1662L5.15626 18.12C5.11876 18.2287 5.14876 18.345 5.22751 18.4275L9.25126 22.4512C9.47626 22.6762 9.78001 22.8 10.0988 22.8C10.5338 22.8 10.935 22.5637 11.145 22.185L14.7113 15.7687L8.23501 9.29249H8.23126Z" fill="#A4A7AE" />
+                      </svg>
+                    }
                     label={t("cleanUp")}
                     disabled={cleanupState.running}
                     onClick={() => { setShowDataMenu(false); handleCleanup(); }}
                   />
                   <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
-                  <DataMenuItem icon={<img src="/file-import.png" alt="" style={{ width: 17, height: 17, opacity: 0.65, filter: "var(--icon-filter)" }} />} label={t("import")} onClick={() => { setShowDataMenu(false); setShowImport(true); }} />
-                  <DataMenuItem icon={<img src="/import-export.png" alt="" style={{ width: 17, height: 17, opacity: 0.65, filter: "var(--icon-filter)" }} />} label={t("export")} onClick={() => { setShowDataMenu(false); setShowExport(true); }} />
+                  <DataMenuItem
+                    icon={
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M7.20005 2.40002C5.8763 2.40002 4.80005 3.47627 4.80005 4.80002V13.8H11.6288L10.4663 12.6375C10.1138 12.285 10.1138 11.715 10.4663 11.3663C10.8188 11.0175 11.3888 11.0138 11.7375 11.3663L14.4375 14.0663C14.79 14.4188 14.79 14.9888 14.4375 15.3375L11.7375 18.0375C11.385 18.39 10.815 18.39 10.4663 18.0375C10.1175 17.685 10.1138 17.115 10.4663 16.7663L11.6288 15.6038H4.80005V19.2038C4.80005 20.5275 5.8763 21.6038 7.20005 21.6038H16.8C18.1238 21.6038 19.2 20.5275 19.2 19.2038V8.79752C19.2 8.16002 18.9488 7.54877 18.4988 7.09877L14.5013 3.10127C14.0513 2.65127 13.4438 2.40002 12.8063 2.40002H7.20005ZM17.0063 9.00002H13.5C13.0013 9.00002 12.6 8.59877 12.6 8.10002V4.59377L17.0063 9.00002Z" fill="#A4A7AE" />
+                      </svg>
+                    }
+                    label={t("import")}
+                    onClick={() => { setShowDataMenu(false); setShowImport(true); }}
+                  />
+                  <DataMenuItem
+                    icon={
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M20.4 5.99998H7.19995C7.19995 4.67623 8.2762 3.59998 9.59995 3.59998H20.4C21.7237 3.59998 22.8 4.67623 22.8 5.99998V13.2C22.8 14.5237 21.7237 15.6 20.4 15.6H18.6V13.2H20.4V5.99998ZM1.19995 10.8C1.19995 9.47623 2.2762 8.39998 3.59995 8.39998H14.4C15.7237 8.39998 16.8 9.47623 16.8 10.8V18C16.8 19.3237 15.7237 20.4 14.4 20.4H3.59995C2.2762 20.4 1.19995 19.3237 1.19995 18V10.8ZM3.59995 12.3C3.59995 12.7987 4.0012 13.2 4.49995 13.2H13.5C13.9987 13.2 14.4 12.7987 14.4 12.3C14.4 11.8012 13.9987 11.4 13.5 11.4H4.49995C4.0012 11.4 3.59995 11.8012 3.59995 12.3Z" fill="#A4A7AE" />
+                      </svg>
+                    }
+                    label={t("export")}
+                    onClick={() => { setShowDataMenu(false); setShowExport(true); }}
+                  />
                   <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
-                  <DataMenuItem icon="💾" label={t("backup")} onClick={() => { setShowDataMenu(false); handleBackup(); }} />
-                  <DataMenuItem icon="📂" label={t("restore")} onClick={() => { setShowDataMenu(false); restoreFileRef.current?.click(); }} />
+                  <DataMenuItem
+                    icon={
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M5.99998 3.59998C4.67623 3.59998 3.59998 4.67623 3.59998 5.99998V18C3.59998 19.3237 4.67623 20.4 5.99998 20.4H18C19.3237 20.4 20.4 19.3237 20.4 18V8.89873C20.4 8.26123 20.1487 7.64998 19.6987 7.19998L16.8 4.30123C16.35 3.85123 15.7387 3.59998 15.1012 3.59998H5.99998ZM7.19998 7.19998C7.19998 6.53623 7.73623 5.99998 8.39998 5.99998H14.4C15.0637 5.99998 15.6 6.53623 15.6 7.19998V9.59998C15.6 10.2637 15.0637 10.8 14.4 10.8H8.39998C7.73623 10.8 7.19998 10.2637 7.19998 9.59998V7.19998ZM12 13.2C13.3237 13.2 14.4 14.2762 14.4 15.6C14.4 16.9237 13.3237 18 12 18C10.6762 18 9.59998 16.9237 9.59998 15.6C9.59998 14.2762 10.6762 13.2 12 13.2Z" fill="#A4A7AE" />
+                      </svg>
+                    }
+                    label={t("backup")}
+                    onClick={() => { setShowDataMenu(false); handleBackup(); }}
+                  />
+                  <DataMenuItem
+                    icon={
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M7.20005 2.40002C5.8763 2.40002 4.80005 3.47627 4.80005 4.80002V13.8H11.6288L10.4663 12.6375C10.1138 12.285 10.1138 11.715 10.4663 11.3663C10.8188 11.0175 11.3888 11.0138 11.7375 11.3663L14.4375 14.0663C14.79 14.4188 14.79 14.9888 14.4375 15.3375L11.7375 18.0375C11.385 18.39 10.815 18.39 10.4663 18.0375C10.1175 17.685 10.1138 17.115 10.4663 16.7663L11.6288 15.6038H4.80005V19.2038C4.80005 20.5275 5.8763 21.6038 7.20005 21.6038H16.8C18.1238 21.6038 19.2 20.5275 19.2 19.2038V8.79752C19.2 8.16002 18.9488 7.54877 18.4988 7.09877L14.5013 3.10127C14.0513 2.65127 13.4438 2.40002 12.8063 2.40002H7.20005ZM17.0063 9.00002H13.5C13.0013 9.00002 12.6 8.59877 12.6 8.10002V4.59377L17.0063 9.00002Z" fill="#A4A7AE" />
+                      </svg>
+                    }
+                    label={t("restore")}
+                    onClick={() => { setShowDataMenu(false); restoreFileRef.current?.click(); }}
+                  />
                   <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
-                  <DataMenuItem icon="🏷️" label={t("clearAllTags")} danger onClick={() => { setShowDataMenu(false); setShowClearAllTags(true); }} />
-                  <DataMenuItem icon="🗑️" label={t("deleteAll")} danger onClick={() => { setShowDataMenu(false); setShowDeleteAll(true); }} />
+                  <DataMenuItem
+                    icon={
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M2.40002 7.20005C2.40002 5.8763 3.47627 4.80005 4.80002 4.80005H16.3013C16.9388 4.80005 17.55 5.0513 18 5.5013L23.6475 11.1525C23.8725 11.3775 24 11.6813 24 12C24 12.3188 23.8725 12.6225 23.6475 12.8475L18 18.4988C17.55 18.9488 16.9388 19.2 16.3013 19.2H4.80002C3.47627 19.2 2.40002 18.1238 2.40002 16.8V7.20005ZM13.3463 9.4538C12.9938 9.1013 12.4238 9.1013 12.075 9.4538L10.8038 10.725L9.53252 9.4538C9.18002 9.1013 8.61002 9.1013 8.26127 9.4538C7.91252 9.8063 7.90877 10.3763 8.26127 10.725L9.53252 11.9963L8.26127 13.2675C7.90877 13.62 7.90877 14.19 8.26127 14.5388C8.61377 14.8875 9.18377 14.8913 9.53252 14.5388L10.8038 13.2675L12.075 14.5388C12.4275 14.8913 12.9975 14.8913 13.3463 14.5388C13.695 14.1863 13.6988 13.6163 13.3463 13.2675L12.075 11.9963L13.3463 10.725C13.6988 10.3725 13.6988 9.80255 13.3463 9.4538Z" fill="#F04438" />
+                      </svg>
+                    }
+                    label={t("clearAllTags")}
+                    danger
+                    onClick={() => { setShowDataMenu(false); setShowClearAllTags(true); }}
+                  />
+                  <DataMenuItem
+                    icon={
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M5.1262 2.6213L4.79995 3.60005H2.39995C1.7362 3.60005 1.19995 4.1363 1.19995 4.80005C1.19995 5.4638 1.7362 6.00005 2.39995 6.00005H15.6C16.2637 6.00005 16.8 5.4638 16.8 4.80005C16.8 4.1363 16.2637 3.60005 15.6 3.60005H13.2L12.8737 2.6213C12.7087 2.13005 12.2512 1.80005 11.7337 1.80005H6.2662C5.7487 1.80005 5.2912 2.13005 5.1262 2.6213ZM18 8.40005C18 9.0638 18.5362 9.60005 19.2 9.60005H22.7999C23.4637 9.60005 23.9999 9.0638 23.9999 8.40005C23.9999 7.7363 23.4637 7.20005 22.7999 7.20005H19.2C18.5362 7.20005 18 7.7363 18 8.40005ZM15.6 7.80005H2.39995V19.2C2.39995 20.5238 3.4762 21.6 4.79995 21.6H13.2C14.5237 21.6 15.6 20.5238 15.6 19.2V7.80005ZM7.79995 11.1V18.3C7.79995 18.7988 7.3987 19.2 6.89995 19.2C6.4012 19.2 5.99995 18.7988 5.99995 18.3V11.1C5.99995 10.6013 6.4012 10.2 6.89995 10.2C7.3987 10.2 7.79995 10.6013 7.79995 11.1ZM12 11.1V18.3C12 18.7988 11.5987 19.2 11.1 19.2C10.6012 19.2 10.2 18.7988 10.2 18.3V11.1C10.2 10.6013 10.6012 10.2 11.1 10.2C11.5987 10.2 12 10.6013 12 11.1ZM19.2 12C18.5362 12 18 12.5363 18 13.2C18 13.8638 18.5362 14.4 19.2 14.4H21.5999C22.2637 14.4 22.7999 13.8638 22.7999 13.2C22.7999 12.5363 22.2637 12 21.5999 12H19.2ZM18 18C18 18.6638 18.5362 19.2 19.2 19.2C19.8637 19.2 20.4 18.6638 20.4 18C20.4 17.3363 19.8637 16.8 19.2 16.8C18.5362 16.8 18 17.3363 18 18Z" fill="#F04438" />
+                      </svg>
+                    }
+                    label={t("deleteAll")}
+                    danger
+                    onClick={() => { setShowDataMenu(false); setShowDeleteAll(true); }}
+                  />
                 </div>
               )}
             </div>
@@ -3362,6 +3508,56 @@ export default function App() {
           </div>
         )}
 
+        {pendingBulkDeleteTags && (
+          <div
+            onClick={() => setPendingBulkDeleteTags(null)}
+            style={{
+              position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)",
+              backdropFilter: "blur(4px)", display: "flex",
+              alignItems: "center", justifyContent: "center", zIndex: 1200,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "var(--card)", border: "1px solid #ef444440",
+                borderRadius: 14, padding: 24, width: 360, maxWidth: "calc(100vw - 32px)",
+                display: "flex", flexDirection: "column", gap: 14,
+                boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
+              }}
+            >
+              <h2 style={{ fontSize: 16, fontWeight: 700, color: "#ef4444", margin: 0 }}>
+                Delete {pendingBulkDeleteTags.length} tag{pendingBulkDeleteTags.length !== 1 ? "s" : ""}?
+              </h2>
+              <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.6, margin: 0 }}>
+                This will remove the selected tag{pendingBulkDeleteTags.length !== 1 ? "s" : ""} from the sidebar and from all bookmarks currently using them.
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => setPendingBulkDeleteTags(null)}
+                  style={{
+                    flex: 1, background: "var(--border)", border: "1px solid var(--border-hover)",
+                    borderRadius: 8, padding: "9px 0", color: "var(--text-2)",
+                    fontSize: 13, fontWeight: 600, cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => deleteBulkSidebarTags(pendingBulkDeleteTags)}
+                  style={{
+                    flex: 1, background: "#ef4444", border: "none",
+                    borderRadius: 8, padding: "9px 0", color: "#fff",
+                    fontSize: 13, fontWeight: 700, cursor: "pointer",
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {cleanupResult && (
           <div
             onClick={() => setCleanupResult(null)}
@@ -3741,9 +3937,11 @@ function IconExpandTabs() {
   );
 }
 
-function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onClear, cleanupBypassed, onToggleCleanupBypass, onChangeColor, onBookmarkDrop, onTagReorder }: {
-  tag: string; count: number; active: boolean;
+function SidebarTagRow({ tag, count, active, editMode, selected, theme, onSelect, onToggleSelect, onRename, onDelete, onClear, cleanupBypassed, onToggleCleanupBypass, onChangeColor, onBookmarkDrop, onTagReorder, activeContextMenu, onOpenContextMenu, onCloseContextMenu }: {
+  tag: string; count: number; active: boolean; editMode: boolean; selected: boolean;
+  theme: ThemeId;
   onSelect: () => void;
+  onToggleSelect: () => void;
   onRename: (newName: string) => void;
   onDelete: () => void;
   onClear: () => void;
@@ -3752,29 +3950,32 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onCle
   onChangeColor: () => void;
   onBookmarkDrop: (bookmarkId: string) => void;
   onTagReorder: (draggedTag: string, targetTag: string) => void;
+  activeContextMenu: { tag: string; x: number; y: number; openUp: boolean } | null;
+  onOpenContextMenu: (x: number, y: number, openUp: boolean) => void;
+  onCloseContextMenu: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [editing, setEditing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const skipSave = useRef(false);
   const c = tagColor(tag);
+  const isDarkTheme = theme === "dark" || theme === "midnight" || theme === "black" || theme === "graphite" || theme === "high-contrast" || theme.includes("night");
 
   useEffect(() => {
-    if (!contextMenu) return;
+    if (!activeContextMenu) return;
     const closeOnOutsideClick = (e: MouseEvent) => {
       if (!contextMenuRef.current) return;
       if (!contextMenuRef.current.contains(e.target as Node)) {
-        setContextMenu(null);
+        onCloseContextMenu();
       }
     };
     const closeOnEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setContextMenu(null);
+      if (e.key === "Escape") onCloseContextMenu();
     };
-    const closeOnResize = () => setContextMenu(null);
-    const closeOnScroll = () => setContextMenu(null);
+    const closeOnResize = () => onCloseContextMenu();
+    const closeOnScroll = () => onCloseContextMenu();
     window.addEventListener("click", closeOnOutsideClick);
     window.addEventListener("resize", closeOnResize);
     window.addEventListener("scroll", closeOnScroll, true);
@@ -3785,7 +3986,7 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onCle
       window.removeEventListener("scroll", closeOnScroll, true);
       window.removeEventListener("keydown", closeOnEscape);
     };
-  }, [contextMenu]);
+  }, [activeContextMenu, onCloseContextMenu]);
 
   const handleSave = () => {
     if (skipSave.current) { skipSave.current = false; return; }
@@ -3816,14 +4017,22 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onCle
   }
 
   return (
-    <div
+      <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); }}
       onContextMenu={(e) => {
         e.preventDefault();
-        setContextMenu({ x: e.clientX, y: e.clientY });
+        const menuWidth = 138;
+        const menuHeight = 154;
+        const margin = 8;
+        const openUp = e.clientY + menuHeight + margin > window.innerHeight;
+        const x = Math.min(e.clientX, window.innerWidth - menuWidth - margin);
+        const y = openUp
+          ? Math.max(margin, e.clientY - menuHeight - margin)
+          : Math.min(e.clientY, window.innerHeight - menuHeight - margin);
+        onOpenContextMenu(x, y, openUp);
       }}
-      draggable={!editing}
+      draggable={!editing && !editMode}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData(TAG_DRAG_MIME, tag);
@@ -3857,12 +4066,12 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onCle
       style={{
         display: "flex", alignItems: "center",
         width: "calc(100% - 16px)", margin: "1px 8px", borderRadius: 6,
-        background: dragOver ? c + "33" : (active || hovered) ? c + "22" : "transparent",
+        background: dragOver ? c + "33" : editMode ? (selected ? c + "22" : hovered ? "var(--border)" : "transparent") : (active || hovered) ? c + "22" : "transparent",
         transition: "background 0.1s",
       }}
     >
       <button
-        onClick={onSelect}
+        onClick={editMode ? onToggleSelect : onSelect}
         style={{
           flex: 1, display: "flex", alignItems: "center", gap: 8,
           padding: "6px 8px", background: "none", border: "none",
@@ -3872,19 +4081,55 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onCle
           transition: "color 0.1s",
         }}
       >
-        <span style={{ width: 8, height: 8, borderRadius: "50%", background: c, flexShrink: 0, display: "inline-block" }} />
+        {editMode ? (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 15,
+              height: 15,
+              cursor: "pointer",
+              appearance: isDarkTheme ? "auto" : "none",
+              ...(isDarkTheme ? {} : { WebkitAppearance: "none" as const }),
+              backgroundColor: isDarkTheme ? "var(--card)" : "#ffffff",
+              backgroundImage: isDarkTheme
+                ? "none"
+                : selected
+                  ? "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M2.3 6.4l2.1 2.1 5.3-5.3' stroke='%232563eb' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")"
+                  : "none",
+              backgroundRepeat: "no-repeat",
+              backgroundPosition: "center",
+              backgroundSize: "11px 11px",
+              accentColor: isDarkTheme ? "#60a5fa" : "#2563eb",
+              border: isDarkTheme ? "none" : "1px solid #cbd5e1",
+              borderRadius: 4,
+              flexShrink: 0,
+              boxShadow: isDarkTheme
+                ? "0 0 0 1px rgba(96, 165, 250, 0.6)"
+                : "0 0 0 1px rgba(255, 255, 255, 0.9)",
+              outline: isDarkTheme
+                ? "1px solid rgba(15, 23, 42, 0.35)"
+                : "1px solid rgba(37, 99, 235, 0.28)",
+              outlineOffset: 1,
+            }}
+          />
+        ) : (
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: c, flexShrink: 0, display: "inline-block" }} />
+        )}
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{tag}</span>
         <span style={{ fontSize: 11, color: "var(--text-4)", flexShrink: 0 }}>{count}</span>
       </button>
 
-      {contextMenu && (
+      {activeContextMenu && (
         <div
           ref={contextMenuRef}
           onClick={(e) => e.stopPropagation()}
           style={{
             position: "fixed",
-            left: contextMenu.x,
-            top: contextMenu.y,
+            left: activeContextMenu.x,
+            top: activeContextMenu.y,
             minWidth: 138,
             background: "var(--card)",
             border: "1px solid var(--border-hover)",
@@ -3897,7 +4142,7 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onCle
           <TagContextMenuItem
             onClick={() => {
               onChangeColor();
-              setContextMenu(null);
+              onCloseContextMenu();
             }}
           >
             Change Color
@@ -3905,7 +4150,7 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onCle
           <TagContextMenuItem
             onClick={() => {
               setEditing(true);
-              setContextMenu(null);
+              onCloseContextMenu();
             }}
           >
             Rename Tag
@@ -3913,7 +4158,7 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onCle
           <TagContextMenuItem
             onClick={() => {
               onClear();
-              setContextMenu(null);
+              onCloseContextMenu();
             }}
           >
             Clear Tag
@@ -3921,7 +4166,7 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onCle
           <TagContextMenuItem
             onClick={() => {
               onToggleCleanupBypass();
-              setContextMenu(null);
+              onCloseContextMenu();
             }}
             checked={cleanupBypassed}
             layout="space-between"
@@ -3932,7 +4177,7 @@ function SidebarTagRow({ tag, count, active, onSelect, onRename, onDelete, onCle
           <TagContextMenuItem
             onClick={() => {
               onDelete();
-              setContextMenu(null);
+              onCloseContextMenu();
             }}
             danger
           >
@@ -4005,6 +4250,43 @@ const appContextMenuBtn: React.CSSProperties = {
   fontSize: 13,
   cursor: "pointer",
 };
+
+function SidebarNewButton({
+  children,
+  onClick,
+  title,
+  style,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  title: string;
+  style?: React.CSSProperties;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        background: hovered ? "var(--sidebar-new-btn-hover-bg)" : "none",
+        border: "1px solid var(--border-hover)",
+        borderRadius: 5,
+        color: "var(--text-3)",
+        fontSize: 11,
+        fontWeight: 600,
+        cursor: "pointer",
+        padding: "2px 7px",
+        lineHeight: 1.4,
+        transition: "background 0.12s",
+        ...style,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
 
 function DataMenuItem({ icon, label, onClick, disabled, danger }: { icon: React.ReactNode; label: string; onClick: () => void; disabled?: boolean; danger?: boolean }) {
   const [hovered, setHovered] = useState(false);
