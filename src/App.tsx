@@ -915,6 +915,7 @@ export default function App() {
   const [showAppPicker, setShowAppPicker] = useState(false);
   const [appSearch, setAppSearch] = useState("");
   const [appPickerSelection, setAppPickerSelection] = useState<string[]>([]);
+  const [showAllApps, setShowAllApps] = useState(false);
   const [customAppName, setCustomAppName] = useState("");
   const [customAppUrl, setCustomAppUrl] = useState("");
   const [customAppIconUrl, setCustomAppIconUrl] = useState("");
@@ -925,6 +926,7 @@ export default function App() {
   const [appEditorIconUrl, setAppEditorIconUrl] = useState("");
   const [appEditorError, setAppEditorError] = useState<string | null>(null);
   const [appContextMenu, setAppContextMenu] = useState<{ x: number; y: number; appId: string } | null>(null);
+  const [pendingAppDelete, setPendingAppDelete] = useState<AppShortcut | null>(null);
   const appContextMenuRef = useRef<HTMLDivElement>(null);
   const [appDraggingId, setAppDraggingId] = useState<string | null>(null);
   const [appDragReadyId, setAppDragReadyId] = useState<string | null>(null);
@@ -953,6 +955,10 @@ export default function App() {
     const remaining = allTags.filter((t) => !orderedExisting.includes(t));
     return [...orderedExisting, ...remaining];
   }, [allTags, tagOrder]);
+  const visibleAppShortcuts = useMemo(
+    () => (showAllApps || appShortcuts.length <= 20 ? appShortcuts : appShortcuts.slice(0, 20)),
+    [appShortcuts, showAllApps],
+  );
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1699,9 +1705,7 @@ export default function App() {
   };
 
   const handleRemoveAppShortcut = (app: AppShortcut) => {
-    const ok = window.confirm(`Remove ${app.name} from Apps?`);
-    if (!ok) return;
-    setAppShortcuts((prev) => prev.filter((x) => x.id !== app.id));
+    setPendingAppDelete(app);
   };
 
   const openEditAppDialog = (app: AppShortcut) => {
@@ -2170,7 +2174,7 @@ export default function App() {
                 }
               }}
             >
-              {appShortcuts.map((app) => {
+              {visibleAppShortcuts.map((app) => {
                 return (
                   <div
                     key={app.id}
@@ -2217,9 +2221,11 @@ export default function App() {
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        cursor: appDragReadyId === app.id ? "grab" : "default",
+                        cursor: appDraggingId === app.id ? "grabbing" : appDragReadyId === app.id ? "grab" : "default",
                         padding: 0,
-                        opacity: appDraggingId === app.id ? 0.6 : 1,
+                        opacity: appDraggingId === app.id ? 0.5 : 1,
+                        transition: "opacity 0.12s ease, transform 0.12s ease",
+                        transform: appDraggingId === app.id ? "scale(0.95)" : "none",
                       }}
                     >
                       <AppIcon app={app} width={24} height={24} radius={4} />
@@ -2228,6 +2234,30 @@ export default function App() {
                 );
               })}
             </div>
+            {appShortcuts.length > 20 && (
+              <div style={{ padding: "0 10px 12px 14px" }}>
+                <button
+                  onClick={() => setShowAllApps((v) => !v)}
+                  style={{
+                    width: "100%",
+                    border: "none",
+                    background: "none",
+                    color: "var(--text-3)",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    padding: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                  <span style={{ whiteSpace: "nowrap" }}>{showAllApps ? "Show less" : "Show more"}</span>
+                  <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                </button>
+              </div>
+            )}
             {appContextMenu && (() => {
               const app = appShortcuts.find((a) => a.id === appContextMenu.appId);
               if (!app) return null;
@@ -2280,13 +2310,80 @@ export default function App() {
               );
             })()}
 
-            <div
-              style={{
-                height: 1,
-                margin: "2px 12px 12px",
-                background: "var(--border)",
-              }}
-            />
+            {pendingAppDelete && (
+              <div
+                onClick={() => setPendingAppDelete(null)}
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  background: "rgba(0,0,0,0.65)",
+                  backdropFilter: "blur(4px)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 1000,
+                }}
+              >
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    background: "var(--card)",
+                    border: "1px solid #ef444440",
+                    borderRadius: 14,
+                    padding: 24,
+                    width: 340,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 14,
+                    boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
+                  }}
+                >
+                  <h2 style={{ fontSize: 16, fontWeight: 700, color: "#ef4444", margin: 0 }}>
+                    Remove {pendingAppDelete.name} from Apps?
+                  </h2>
+                  <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.6, margin: 0 }}>
+                    This will remove <strong style={{ color: "var(--text)" }}>{pendingAppDelete.name}</strong> from the Apps sidebar.
+                  </p>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      onClick={() => setPendingAppDelete(null)}
+                      style={{
+                        flex: 1,
+                        background: "var(--border)",
+                        border: "1px solid var(--border-hover)",
+                        borderRadius: 8,
+                        padding: "9px 0",
+                        color: "var(--text-2)",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        setAppShortcuts((prev) => prev.filter((x) => x.id !== pendingAppDelete.id));
+                        setPendingAppDelete(null);
+                      }}
+                      style={{
+                        flex: 1,
+                        background: "#ef4444",
+                        border: "none",
+                        borderRadius: 8,
+                        padding: "9px 0",
+                        color: "#fff",
+                        fontSize: 13,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Remove App
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div style={{ padding: "0 8px 14px 16px", display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", letterSpacing: "0.07em", textTransform: "uppercase", flex: 1 }}>
@@ -2743,6 +2840,7 @@ export default function App() {
             >
               <option value="date">{t("dateAdded")}</option>
               <option value="name">{t("nameAZ")}</option>
+              <option value="ranking">Manual Reorder</option>
             </select>
 
             <div ref={dataMenuRef} style={{ position: "relative" }}>
