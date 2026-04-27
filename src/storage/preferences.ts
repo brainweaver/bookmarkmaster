@@ -1,4 +1,5 @@
 import {
+  ARCHIVED_TAG_ORDER_KEY,
   CLEANUP_BYPASS_TAGS_KEY,
   PREF_DISPLAY_MODE_KEY,
   PREF_GROUP_BY_DATE_KEY,
@@ -24,6 +25,7 @@ export type SanitizedBackupPreferences = {
   zoom?: number;
   tagOrder?: string[];
   cleanupBypassTags?: string[];
+  archivedTagOrder?: string[];
   sidebarOpen?: boolean;
   appShortcuts?: unknown[];
   appCatalog?: unknown[];
@@ -100,6 +102,17 @@ export function readTagOrderPreference(): string[] {
   }
 }
 
+export function readArchivedTagOrderPreference(): string[] {
+  try {
+    const raw = persistenceGetItem(ARCHIVED_TAG_ORDER_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export function readCleanupBypassTagsPreference(): string[] {
   try {
     const raw = persistenceGetItem(CLEANUP_BYPASS_TAGS_KEY);
@@ -143,6 +156,10 @@ export function writeTagOrderPreference(value: string[]): void {
   persistenceSetItem(TAG_ORDER_KEY, JSON.stringify(value));
 }
 
+export function writeArchivedTagOrderPreference(value: string[]): void {
+  persistenceSetItem(ARCHIVED_TAG_ORDER_KEY, JSON.stringify(value));
+}
+
 export function writeCleanupBypassTagsPreference(value: string[]): void {
   persistenceSetItem(CLEANUP_BYPASS_TAGS_KEY, JSON.stringify(value));
 }
@@ -180,6 +197,7 @@ export function sanitizeBackupPreferences(
 
   const rankOrder = asStringArray(prefs.rankOrder);
   const tagOrder = asStringArray(prefs.tagOrder);
+  const archivedTagOrder = asStringArray(prefs.archivedTagOrder);
 
   return {
     ...(theme ? { theme } : {}),
@@ -189,6 +207,7 @@ export function sanitizeBackupPreferences(
     ...(rankOrder.length > 0 ? { rankOrder } : {}),
     ...(zoom !== undefined ? { zoom } : {}),
     ...(tagOrder.length > 0 ? { tagOrder } : {}),
+    ...(archivedTagOrder.length > 0 ? { archivedTagOrder } : {}),
     ...(cleanupBypassTags.length > 0 ? { cleanupBypassTags } : {}),
     ...(typeof prefs.sidebarOpen === "boolean" ? { sidebarOpen: prefs.sidebarOpen } : {}),
     ...(Array.isArray(prefs.appShortcuts) ? { appShortcuts: prefs.appShortcuts } : {}),

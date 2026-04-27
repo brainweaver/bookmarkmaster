@@ -8,6 +8,7 @@ export const PREF_SORT_BY_KEY = "ui_sort_by_v1";
 export const PREF_RANK_ORDER_KEY = "ui_rank_order_v1";
 export const PREF_ZOOM_KEY = "ui_zoom_v1";
 export const TAG_ORDER_KEY = "ui_tag_order_v1";
+export const ARCHIVED_TAG_ORDER_KEY = "ui_archived_tag_order_v1";
 export const CLEANUP_BYPASS_TAGS_KEY = "ui_cleanup_bypass_tags_v1";
 export const APP_SHORTCUTS_KEY = "ui_app_shortcuts_v1";
 export const APP_CATALOG_KEY = "ui_app_catalog_v1";

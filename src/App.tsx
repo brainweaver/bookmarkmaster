@@ -17,6 +17,7 @@ import {
 } from "./storage/keys";
 import { persistenceGetItem, persistenceSetItem } from "./storage/persistence";
 import {
+  readArchivedTagOrderPreference,
   readCleanupBypassTagsPreference,
   readDisplayModePreference,
   readGroupByDatePreference,
@@ -26,6 +27,7 @@ import {
   readThemePreference,
   readZoomPreference,
   sanitizeBackupPreferences,
+  writeArchivedTagOrderPreference,
   writeCleanupBypassTagsPreference,
   writeDisplayModePreference,
   writeGroupByDatePreference,
@@ -46,6 +48,7 @@ const NOT_REACHABLE_FILTER = SYSTEM_TAG_NOT_REACHABLE;
 const BOOKMARK_DRAG_MIME = "application/x-bookmark-id";
 const BOOKMARK_DRAG_FALLBACK_PREFIX = "bookmark:";
 const TAG_DRAG_MIME = "application/x-sidebar-tag";
+const TAG_SECTION_DRAG_MIME = "application/x-sidebar-tag-section";
 const APP_SHORTCUT_DRAG_MIME = "application/x-app-shortcut-id";
 const APP_SHORTCUT_DRAG_FALLBACK_PREFIX = "app-shortcut:";
 
@@ -731,6 +734,7 @@ type BackupPreferences = {
   rankOrder?: string[];
   zoom?: number;
   tagOrder?: string[];
+  archivedTagOrder?: string[];
   sidebarOpen?: boolean;
   appShortcuts?: AppShortcut[];
   appCatalog?: AppGroup[];
@@ -865,6 +869,10 @@ function loadTagOrder(): string[] {
   return readTagOrderPreference();
 }
 
+function loadArchivedTagOrder(): string[] {
+  return readArchivedTagOrderPreference();
+}
+
 function loadCleanupBypassTags(): string[] {
   return readCleanupBypassTagsPreference();
 }
@@ -885,6 +893,7 @@ export default function App() {
   const [sortBy, setSortBy] = useState<SortBy>(loadSortBy);
   const [rankOrder, setRankOrder] = useState<string[]>(loadRankOrder);
   const rankOrderHydratedRef = useRef(false);
+  const sidebarTagInitialSelectionRef = useRef(false);
   const [modal, setModal] = useState<ModalState>({ mode: "closed" });
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -905,12 +914,15 @@ export default function App() {
   const [pendingTagDelete, setPendingTagDelete] = useState<string | null>(null);
   const [, setTagColorVersion] = useState(0);
   const [tagOrder, setTagOrder] = useState<string[]>(loadTagOrder);
+  const [archivedTagOrder, setArchivedTagOrder] = useState<string[]>(loadArchivedTagOrder);
+  const [showArchivedTags, setShowArchivedTags] = useState(false);
   const [cleanupBypassTags, setCleanupBypassTags] = useState<string[]>(loadCleanupBypassTags);
-  const [sidebarTagContextMenu, setSidebarTagContextMenu] = useState<{ tag: string; x: number; y: number; openUp: boolean } | null>(null);
+  const [sidebarTagContextMenu, setSidebarTagContextMenu] = useState<{ tag: string; x: number; y: number; openUp: boolean; archived: boolean } | null>(null);
   const [sidebarTagEditMode, setSidebarTagEditMode] = useState(false);
   const [selectedSidebarTags, setSelectedSidebarTags] = useState<string[]>([]);
   const [pendingBulkDeleteTags, setPendingBulkDeleteTags] = useState<string[] | null>(null);
   const [pendingTagClear, setPendingTagClear] = useState<string | null>(null);
+  const [pendingTagBookmarkDelete, setPendingTagBookmarkDelete] = useState<{ tag: string; count: number } | null>(null);
   const [appCatalog, setAppCatalog] = useState<AppGroup[]>(loadAppCatalog);
   const [appShortcuts, setAppShortcuts] = useState<AppShortcut[]>(loadAppShortcuts);
   const [showAppPicker, setShowAppPicker] = useState(false);
@@ -958,14 +970,37 @@ export default function App() {
       .filter((group) => group.apps.length > 0);
   }, [appCatalog, appSearch]);
   const orderedSidebarTags = useMemo(() => {
-    const orderedExisting = tagOrder.filter((t) => allTags.includes(t));
-    const remaining = allTags.filter((t) => !orderedExisting.includes(t));
+    const archivedSet = new Set(archivedTagOrder);
+    const orderedExisting = tagOrder.filter((t) => allTags.includes(t) && !archivedSet.has(t));
+    const remaining = allTags.filter((t) => !orderedExisting.includes(t) && !archivedSet.has(t));
     return [...orderedExisting, ...remaining];
-  }, [allTags, tagOrder]);
+  }, [allTags, archivedTagOrder, tagOrder]);
+  const archivedSidebarTags = useMemo(
+    () => archivedTagOrder.filter((t) => allTags.includes(t)),
+    [allTags, archivedTagOrder],
+  );
   const visibleAppShortcuts = useMemo(
     () => (showAllApps || appShortcuts.length <= 20 ? appShortcuts : appShortcuts.slice(0, 20)),
     [appShortcuts, showAllApps],
   );
+
+  useEffect(() => {
+    if (archivedTagOrder.length === 0) return;
+    const archivedSet = new Set(archivedTagOrder);
+    setTagOrder((prev) => {
+      const next = prev.filter((tag) => !archivedSet.has(tag));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [archivedTagOrder]);
+
+  useEffect(() => {
+    if (sidebarTagInitialSelectionRef.current) return;
+    if (selectedTag !== null) return;
+    const firstTag = orderedSidebarTags[0];
+    if (!firstTag) return;
+    sidebarTagInitialSelectionRef.current = true;
+    setSelectedTag(firstTag);
+  }, [orderedSidebarTags, selectedTag]);
 
   const promptDuplicateOverwrite = useCallback((title: string, url: string, mode: "bookmark" | "drop") => {
     if (pendingDuplicateResolveRef.current) {
@@ -1090,6 +1125,10 @@ export default function App() {
   useEffect(() => {
     writeTagOrderPreference(tagOrder);
   }, [tagOrder]);
+
+  useEffect(() => {
+    writeArchivedTagOrderPreference(archivedTagOrder);
+  }, [archivedTagOrder]);
 
   useEffect(() => {
     writeCleanupBypassTagsPreference(cleanupBypassTags);
@@ -1528,6 +1567,29 @@ export default function App() {
     setTagOrder(next);
   };
 
+  const archiveSidebarTag = (tag: string) => {
+    setTagOrder((prev) => prev.filter((t) => t !== tag));
+    setArchivedTagOrder((prev) => (prev.includes(tag) ? prev : [...prev, tag]));
+    setShowArchivedTags(true);
+  };
+
+  const restoreSidebarTagToEnd = (tag: string) => {
+    setArchivedTagOrder((prev) => prev.filter((t) => t !== tag));
+    setTagOrder((prev) => (prev.includes(tag) ? prev : [...prev, tag]));
+  };
+
+  const restoreArchivedSidebarTagBefore = (draggedTag: string, targetTag: string) => {
+    if (draggedTag === targetTag) return;
+    setArchivedTagOrder((prev) => prev.filter((t) => t !== draggedTag));
+    setTagOrder((prev) => {
+      const next = prev.filter((t) => t !== draggedTag);
+      const targetIndex = next.indexOf(targetTag);
+      if (targetIndex < 0) return [...next, draggedTag];
+      next.splice(targetIndex, 0, draggedTag);
+      return next;
+    });
+  };
+
   const exitSidebarTagEditMode = () => {
     setSidebarTagEditMode(false);
     setSelectedSidebarTags([]);
@@ -1558,6 +1620,7 @@ export default function App() {
     const tagSet = new Set(tagsToDelete);
     tagsToDelete.forEach((tag) => deleteTag(tag));
     setTagOrder((prev) => prev.filter((tag) => !tagSet.has(tag)));
+    setArchivedTagOrder((prev) => prev.filter((tag) => !tagSet.has(tag)));
     setCleanupBypassTags((prev) => prev.filter((tag) => !tagSet.has(tag)));
     if (selectedTag && tagSet.has(selectedTag)) setSelectedTag(null);
     exitSidebarTagEditMode();
@@ -1568,9 +1631,10 @@ export default function App() {
     const normalized = normalizeTagName(newName);
 
     if (normalized && normalized !== oldName) {
-      setTagOrder((prev) => {
+      const occupiedNames = new Set([...orderedSidebarTags, ...archivedSidebarTags].filter((t) => t !== oldName));
+      const renameOrder = (prev: string[], visual: string[]) => {
         const hasOld = prev.includes(oldName);
-        const hasNew = prev.includes(normalized);
+        const hasNew = occupiedNames.has(normalized);
 
         if (hasOld) {
           if (hasNew) {
@@ -1579,15 +1643,22 @@ export default function App() {
           return prev.map((t) => (t === oldName ? normalized : t));
         }
 
-        // Keep renamed tags in the same visual sidebar position even when
-        // they were not previously pinned in tagOrder.
-        const visual = [...orderedSidebarTags];
         const from = visual.indexOf(oldName);
         if (from < 0) return prev;
+        if (hasNew) return prev;
         const without = visual.filter((t) => t !== oldName && t !== normalized);
         const insertAt = Math.max(0, Math.min(from, without.length));
         without.splice(insertAt, 0, normalized);
         return without;
+      };
+
+      setTagOrder((prev) => {
+        // Keep renamed tags in the same visual sidebar position even when
+        // they were not previously pinned in tagOrder.
+        return renameOrder(prev, orderedSidebarTags);
+      });
+      setArchivedTagOrder((prev) => {
+        return renameOrder(prev, archivedSidebarTags);
       });
     }
 
@@ -1620,13 +1691,8 @@ export default function App() {
     );
   };
 
-  const handleClearSidebarTag = (tag: string, count: number) => {
-    if (count > 1) {
-      setPendingTagClear(tag);
-      return;
-    }
-    clearTag(tag);
-    if (selectedTag === tag) setSelectedTag(null);
+  const handleDeleteBookmarksOnTag = (tag: string, count: number) => {
+    setPendingTagBookmarkDelete({ tag, count });
   };
 
   const handleClearNotTagged = () => {
@@ -1902,6 +1968,7 @@ export default function App() {
         rankOrder,
         zoom,
         tagOrder,
+        archivedTagOrder,
         sidebarOpen,
         appShortcuts,
         appCatalog,
@@ -1966,6 +2033,7 @@ export default function App() {
         }
         if (typeof prefs.zoom === "number") setZoom(prefs.zoom);
         if (Array.isArray(prefs.tagOrder)) setTagOrder(prefs.tagOrder);
+        if (Array.isArray(prefs.archivedTagOrder)) setArchivedTagOrder(prefs.archivedTagOrder);
         if (Array.isArray(prefs.cleanupBypassTags)) setCleanupBypassTags(prefs.cleanupBypassTags);
         if (typeof prefs.sidebarOpen === "boolean") setSidebarOpen(prefs.sidebarOpen);
         if (Array.isArray(prefs.appShortcuts)) {
@@ -2538,12 +2606,15 @@ export default function App() {
                   active={selectedTag === tag}
                   editMode={sidebarTagEditMode}
                   selected={selectedSidebarTags.includes(tag)}
+                  archived={false}
                   theme={theme}
                   onSelect={() => setSelectedTag(selectedTag === tag ? null : tag)}
                   onToggleSelect={() => toggleSelectedSidebarTag(tag)}
                   onRename={(newName) => handleRenameSidebarTag(tag, newName)}
                   onDelete={() => setPendingTagDelete(tag)}
-                  onClear={() => handleClearSidebarTag(tag, count)}
+                  onDeleteBookmarks={() => handleDeleteBookmarksOnTag(tag, count)}
+                  onArchive={() => archiveSidebarTag(tag)}
+                  onRestore={() => restoreSidebarTagToEnd(tag)}
                   cleanupBypassed={cleanupBypassTags.includes(tag)}
                   onToggleCleanupBypass={() => {
                     setCleanupBypassTags((prev) =>
@@ -2558,12 +2629,85 @@ export default function App() {
                   }}
                   onBookmarkDrop={(bookmarkId) => handleBookmarkDropOnTag(bookmarkId, tag)}
                   onTagReorder={handleReorderSidebarTag}
+                  onRestoreArchivedTag={restoreArchivedSidebarTagBefore}
                   activeContextMenu={sidebarTagContextMenu?.tag === tag ? sidebarTagContextMenu : null}
-                  onOpenContextMenu={(x, y, openUp) => setSidebarTagContextMenu({ tag, x, y, openUp })}
+                  onOpenContextMenu={(x, y, openUp) => setSidebarTagContextMenu({ tag, x, y, openUp, archived: false })}
                   onCloseContextMenu={() => setSidebarTagContextMenu(null)}
                 />
               );
             })}
+            {archivedSidebarTags.length > 0 && (
+              <>
+                <div style={{ margin: "10px 8px 4px 16px", display: "flex", alignItems: "center" }}>
+                  <button
+                    onClick={() => setShowArchivedTags((prev) => !prev)}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      border: "none",
+                      background: "none",
+                      padding: "4px 0",
+                      cursor: "pointer",
+                      color: "var(--text-3)",
+                      fontSize: 11,
+                      fontWeight: 800,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    <span>Archived Tags</span>
+                    <span style={{ marginLeft: "auto", color: "var(--text-4)", fontSize: 11, fontWeight: 700 }}>
+                      {archivedSidebarTags.length}
+                    </span>
+                    <span style={{ transform: showArchivedTags ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.12s" }}>
+                      ▾
+                    </span>
+                  </button>
+                </div>
+                {showArchivedTags && archivedSidebarTags.map((tag) => {
+                  const count = bookmarks.filter((b) => b.tags.includes(tag)).length;
+                  return (
+                    <SidebarTagRow
+                      key={tag}
+                      tag={tag}
+                      count={count}
+                      active={selectedTag === tag}
+                      editMode={sidebarTagEditMode}
+                      selected={selectedSidebarTags.includes(tag)}
+                      archived
+                      theme={theme}
+                      onSelect={() => setSelectedTag(selectedTag === tag ? null : tag)}
+                      onToggleSelect={() => toggleSelectedSidebarTag(tag)}
+                      onRename={(newName) => handleRenameSidebarTag(tag, newName)}
+                      onDelete={() => setPendingTagDelete(tag)}
+                      onDeleteBookmarks={() => handleDeleteBookmarksOnTag(tag, count)}
+                      onArchive={() => archiveSidebarTag(tag)}
+                      onRestore={() => restoreSidebarTagToEnd(tag)}
+                      cleanupBypassed={cleanupBypassTags.includes(tag)}
+                      onToggleCleanupBypass={() => {
+                        setCleanupBypassTags((prev) =>
+                          prev.includes(tag)
+                            ? prev.filter((t) => t !== tag)
+                            : [...prev, tag]
+                        );
+                      }}
+                      onChangeColor={() => {
+                        cycleTagColor(tag);
+                        setTagColorVersion((v) => v + 1);
+                      }}
+                      onBookmarkDrop={(bookmarkId) => handleBookmarkDropOnTag(bookmarkId, tag)}
+                      onTagReorder={handleReorderSidebarTag}
+                      onRestoreArchivedTag={restoreArchivedSidebarTagBefore}
+                      activeContextMenu={sidebarTagContextMenu?.tag === tag ? sidebarTagContextMenu : null}
+                      onOpenContextMenu={(x, y, openUp) => setSidebarTagContextMenu({ tag, x, y, openUp, archived: true })}
+                      onCloseContextMenu={() => setSidebarTagContextMenu(null)}
+                    />
+                  );
+                })}
+              </>
+            )}
           </div>
         </aside>
 
@@ -2783,7 +2927,7 @@ export default function App() {
                 letterSpacing: "0.02em",
               }}
             >
-              v1.0.2
+              v1.0.3
             </span>
 
             <div style={{ flex: 1 }} />
@@ -2868,7 +3012,7 @@ export default function App() {
             >
               <option value="date">{t("dateAdded")}</option>
               <option value="name">{t("nameAZ")}</option>
-              <option value="ranking">Manual Reorder</option>
+              <option value="ranking">Manual Sort</option>
             </select>
 
             <div ref={dataMenuRef} style={{ position: "relative" }}>
@@ -3238,6 +3382,7 @@ export default function App() {
                 rankOrder,
                 zoom,
                 tagOrder,
+                archivedTagOrder,
                 sidebarOpen,
                 appShortcuts,
                 appCatalog,
@@ -3266,6 +3411,7 @@ export default function App() {
                 rankOrder,
                 zoom,
                 tagOrder,
+                archivedTagOrder,
                 sidebarOpen,
                 appShortcuts,
                 appCatalog,
@@ -3696,6 +3842,8 @@ export default function App() {
                   onClick={() => {
                     deleteTag(pendingTagDelete);
                     setCleanupBypassTags((prev) => prev.filter((t) => t !== pendingTagDelete));
+                    setTagOrder((prev) => prev.filter((t) => t !== pendingTagDelete));
+                    setArchivedTagOrder((prev) => prev.filter((t) => t !== pendingTagDelete));
                     if (selectedTag === pendingTagDelete) setSelectedTag(null);
                     setPendingTagDelete(null);
                   }}
@@ -3833,6 +3981,83 @@ export default function App() {
                   }}
                 >
                   Clear Tag
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {pendingTagBookmarkDelete && (
+          <div
+            onClick={() => setPendingTagBookmarkDelete(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.65)",
+              backdropFilter: "blur(4px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1160,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "var(--card)",
+                border: "1px solid #ef444440",
+                borderRadius: 14,
+                padding: 24,
+                width: 420,
+                maxWidth: "calc(100vw - 32px)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+                boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
+              }}
+            >
+              <h2 style={{ fontSize: 16, fontWeight: 700, color: "#ef4444", margin: 0 }}>
+                Delete bookmarks on "{pendingTagBookmarkDelete.tag}"?
+              </h2>
+              <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.6, margin: 0 }}>
+                This tag has {pendingTagBookmarkDelete.count} bookmark{pendingTagBookmarkDelete.count !== 1 ? "s" : ""}. Are you sure you want to delete them?
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => setPendingTagBookmarkDelete(null)}
+                  style={{
+                    flex: 1,
+                    background: "var(--border)",
+                    border: "1px solid var(--border-hover)",
+                    borderRadius: 8,
+                    padding: "9px 0",
+                    color: "var(--text-2)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    replaceBookmarks(bookmarks.filter((b) => !b.tags.includes(pendingTagBookmarkDelete.tag)));
+                    if (selectedTag === pendingTagBookmarkDelete.tag) setSelectedTag(null);
+                    setPendingTagBookmarkDelete(null);
+                  }}
+                  style={{
+                    flex: 1,
+                    background: "#ef4444",
+                    border: "none",
+                    borderRadius: 8,
+                    padding: "9px 0",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Delete bookmarks
                 </button>
               </div>
             </div>
@@ -4218,20 +4443,23 @@ function IconExpandTabs() {
   );
 }
 
-function SidebarTagRow({ tag, count, active, editMode, selected, theme, onSelect, onToggleSelect, onRename, onDelete, onClear, cleanupBypassed, onToggleCleanupBypass, onChangeColor, onBookmarkDrop, onTagReorder, activeContextMenu, onOpenContextMenu, onCloseContextMenu }: {
-  tag: string; count: number; active: boolean; editMode: boolean; selected: boolean;
+function SidebarTagRow({ tag, count, active, editMode, selected, archived, theme, onSelect, onToggleSelect, onRename, onDelete, onDeleteBookmarks, onArchive, onRestore, cleanupBypassed, onToggleCleanupBypass, onChangeColor, onBookmarkDrop, onTagReorder, onRestoreArchivedTag, activeContextMenu, onOpenContextMenu, onCloseContextMenu }: {
+  tag: string; count: number; active: boolean; editMode: boolean; selected: boolean; archived: boolean;
   theme: ThemeId;
   onSelect: () => void;
   onToggleSelect: () => void;
   onRename: (newName: string) => void;
   onDelete: () => void;
-  onClear: () => void;
+  onDeleteBookmarks: () => void;
+  onArchive: () => void;
+  onRestore: () => void;
   cleanupBypassed: boolean;
   onToggleCleanupBypass: () => void;
   onChangeColor: () => void;
   onBookmarkDrop: (bookmarkId: string) => void;
   onTagReorder: (draggedTag: string, targetTag: string) => void;
-  activeContextMenu: { tag: string; x: number; y: number; openUp: boolean } | null;
+  onRestoreArchivedTag: (draggedTag: string, targetTag: string) => void;
+  activeContextMenu: { tag: string; x: number; y: number; openUp: boolean; archived: boolean } | null;
   onOpenContextMenu: (x: number, y: number, openUp: boolean) => void;
   onCloseContextMenu: () => void;
 }) {
@@ -4304,7 +4532,7 @@ function SidebarTagRow({ tag, count, active, editMode, selected, theme, onSelect
       onContextMenu={(e) => {
         e.preventDefault();
         const menuWidth = 138;
-        const menuHeight = 154;
+        const menuHeight = 184;
         const margin = 8;
         const openUp = e.clientY + menuHeight + margin > window.innerHeight;
         const x = Math.min(e.clientX, window.innerWidth - menuWidth - margin);
@@ -4317,11 +4545,16 @@ function SidebarTagRow({ tag, count, active, editMode, selected, theme, onSelect
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData(TAG_DRAG_MIME, tag);
+        e.dataTransfer.setData(TAG_SECTION_DRAG_MIME, archived ? "archived" : "active");
       }}
       onDragOver={(e) => {
         const hasBookmarkData = e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME);
         const hasTagData = e.dataTransfer.types.includes(TAG_DRAG_MIME);
-        if (!hasBookmarkData && !hasTagData) return;
+        if (archived) {
+          if (!hasBookmarkData) return;
+        } else if (!hasBookmarkData && !hasTagData) {
+          return;
+        }
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
         setDragOver(true);
@@ -4332,7 +4565,15 @@ function SidebarTagRow({ tag, count, active, editMode, selected, theme, onSelect
         setDragOver(false);
         const draggedTag = e.dataTransfer.getData(TAG_DRAG_MIME);
         if (draggedTag) {
-          onTagReorder(draggedTag, tag);
+          const sourceSection = e.dataTransfer.getData(TAG_SECTION_DRAG_MIME) === "archived" ? "archived" : "active";
+          if (sourceSection === "archived" && !archived) {
+            onRestoreArchivedTag(draggedTag, tag);
+            return;
+          }
+          if (sourceSection === "active" && !archived) {
+            onTagReorder(draggedTag, tag);
+            return;
+          }
           return;
         }
         const directId = e.dataTransfer.getData(BOOKMARK_DRAG_MIME);
@@ -4420,41 +4661,57 @@ function SidebarTagRow({ tag, count, active, editMode, selected, theme, onSelect
             zIndex: 3000,
           }}
         >
-          <TagContextMenuItem
-            onClick={() => {
-              onChangeColor();
-              onCloseContextMenu();
-            }}
-          >
-            Change Color
-          </TagContextMenuItem>
-          <TagContextMenuItem
-            onClick={() => {
-              setEditing(true);
-              onCloseContextMenu();
-            }}
-          >
-            Rename Tag
-          </TagContextMenuItem>
-          <TagContextMenuItem
-            onClick={() => {
-              onClear();
-              onCloseContextMenu();
-            }}
-          >
-            Clear Tag
-          </TagContextMenuItem>
-          <TagContextMenuItem
-            onClick={() => {
-              onToggleCleanupBypass();
-              onCloseContextMenu();
-            }}
-            checked={cleanupBypassed}
-            layout="space-between"
-          >
-            Bypass Clean Up
-          </TagContextMenuItem>
-          <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+          {!archived && (
+            <TagContextMenuItem
+              onClick={() => {
+                onChangeColor();
+                onCloseContextMenu();
+              }}
+            >
+              Change Color
+            </TagContextMenuItem>
+          )}
+          {!archived && (
+            <TagContextMenuItem
+              onClick={() => {
+                setEditing(true);
+                onCloseContextMenu();
+              }}
+            >
+              Rename Tag
+            </TagContextMenuItem>
+          )}
+          {!archived && (
+            <TagContextMenuItem
+              onClick={() => {
+                onToggleCleanupBypass();
+                onCloseContextMenu();
+              }}
+              checked={cleanupBypassed}
+              layout="space-between"
+            >
+              Bypass Clean Up
+            </TagContextMenuItem>
+          )}
+          {!archived ? (
+            <TagContextMenuItem
+              onClick={() => {
+                onArchive();
+                onCloseContextMenu();
+              }}
+            >
+              Archive Tag
+            </TagContextMenuItem>
+          ) : (
+            <TagContextMenuItem
+              onClick={() => {
+                onRestore();
+                onCloseContextMenu();
+              }}
+            >
+              Restore Tag
+            </TagContextMenuItem>
+          )}
           <TagContextMenuItem
             onClick={() => {
               onDelete();
@@ -4463,6 +4720,15 @@ function SidebarTagRow({ tag, count, active, editMode, selected, theme, onSelect
             danger
           >
             Delete Tag
+          </TagContextMenuItem>
+          <TagContextMenuItem
+            onClick={() => {
+              onDeleteBookmarks();
+              onCloseContextMenu();
+            }}
+            danger
+          >
+            Delete Bookmarks
           </TagContextMenuItem>
         </div>
       )}
