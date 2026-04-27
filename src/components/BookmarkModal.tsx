@@ -5,7 +5,7 @@ import { isSystemTag, visibleTags } from "../constants/tags";
 
 interface Props {
   initial?: Bookmark | null;
-  prefill?: { url: string; title: string; favicon: string; description?: string };
+  prefill?: { url: string; title: string; favicon: string; description?: string; tags?: string[] };
   existingTags: string[];
   onSave: (data: Omit<Bookmark, "id" | "addedAt">) => void;
   onClose: () => void;
@@ -17,8 +17,7 @@ export default function BookmarkModal({ initial, prefill, existingTags, onSave, 
   const [url, setUrl] = useState(initial?.url ?? prefill?.url ?? "");
   const [favicon, setFavicon] = useState(initial?.favicon ?? prefill?.favicon ?? "");
   const [description, setDescription] = useState(initial?.description ?? prefill?.description ?? "");
-  const [tags, setTags] = useState<string[]>(visibleTags(initial?.tags ?? []));
-  const [ranking, setRanking] = useState<number>(initial?.ranking ?? 0);
+  const [tags, setTags] = useState<string[]>(visibleTags(initial?.tags ?? prefill?.tags ?? []));
   const [tagInput, setTagInput] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -94,7 +93,7 @@ export default function BookmarkModal({ initial, prefill, existingTags, onSave, 
       favicon,
       description: description.trim() || undefined,
       tags: [...tags, ...systemTags],
-      ranking: ranking || undefined,
+      ranking: initial?.ranking ?? undefined,
     });
   };
 
@@ -321,20 +320,6 @@ export default function BookmarkModal({ initial, prefill, existingTags, onSave, 
             )}
           </div>
         </Field>
-
-        {initial && (
-          /* Ranking */
-          <Field label="Ranking" hint="higher number = sorted first">
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={ranking}
-              onChange={(e) => setRanking(Math.max(0, Math.floor(Number(e.target.value))))}
-              style={inputStyle(false)}
-            />
-          </Field>
-        )}
 
         {/* Actions */}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>

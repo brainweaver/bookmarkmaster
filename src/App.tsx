@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import BookmarkCard from "./components/BookmarkCard";
 import TimelineView from "./components/TimelineView";
 import ListView from "./components/ListView";
@@ -719,7 +719,7 @@ type DisplayMode = "list" | "grid" | "preview";
 type SortBy = "date" | "name" | "ranking";
 type ModalState =
   | { mode: "closed" }
-  | { mode: "add"; prefill?: { url: string; title: string; favicon: string; description?: string } }
+  | { mode: "add"; prefill?: { url: string; title: string; favicon: string; description?: string; tags?: string[] } }
   | { mode: "edit"; bookmark: Bookmark };
 
 
@@ -910,6 +910,7 @@ export default function App() {
   const [sidebarTagEditMode, setSidebarTagEditMode] = useState(false);
   const [selectedSidebarTags, setSelectedSidebarTags] = useState<string[]>([]);
   const [pendingBulkDeleteTags, setPendingBulkDeleteTags] = useState<string[] | null>(null);
+  const [pendingTagClear, setPendingTagClear] = useState<string | null>(null);
   const [appCatalog, setAppCatalog] = useState<AppGroup[]>(loadAppCatalog);
   const [appShortcuts, setAppShortcuts] = useState<AppShortcut[]>(loadAppShortcuts);
   const [showAppPicker, setShowAppPicker] = useState(false);
@@ -932,6 +933,12 @@ export default function App() {
   const [appDragReadyId, setAppDragReadyId] = useState<string | null>(null);
   const appDragHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [appPickerError, setAppPickerError] = useState<string | null>(null);
+  const [pendingDuplicate, setPendingDuplicate] = useState<{
+    title: string;
+    url: string;
+    mode: "bookmark" | "drop";
+  } | null>(null);
+  const pendingDuplicateResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
 
   // When opened via extension toolbar click or context menu, URL params carry
   // the originating tab's info — auto-open the add modal with it prefilled.
@@ -959,6 +966,23 @@ export default function App() {
     () => (showAllApps || appShortcuts.length <= 20 ? appShortcuts : appShortcuts.slice(0, 20)),
     [appShortcuts, showAllApps],
   );
+
+  const promptDuplicateOverwrite = useCallback((title: string, url: string, mode: "bookmark" | "drop") => {
+    if (pendingDuplicateResolveRef.current) {
+      pendingDuplicateResolveRef.current(false);
+      pendingDuplicateResolveRef.current = null;
+    }
+    return new Promise<boolean>((resolve) => {
+      pendingDuplicateResolveRef.current = resolve;
+      setPendingDuplicate({ title, url, mode });
+    });
+  }, []);
+
+  const settleDuplicateOverwrite = useCallback((confirmed: boolean) => {
+    pendingDuplicateResolveRef.current?.(confirmed);
+    pendingDuplicateResolveRef.current = null;
+    setPendingDuplicate(null);
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1170,14 +1194,12 @@ export default function App() {
     ? Math.round((cleanupState.progress / cleanupState.total) * 100)
     : 0;
 
-  const handleSave = (data: Omit<Bookmark, "id" | "addedAt">) => {
+  const handleSave = async (data: Omit<Bookmark, "id" | "addedAt">) => {
     if (modal.mode === "add") {
       const incomingKey = normaliseUrlForDedupe(data.url);
       const existing = bookmarks.find((b) => normaliseUrlForDedupe(b.url) === incomingKey);
       if (existing) {
-        const confirmed = window.confirm(
-          `A bookmark for this link already exists.\n\nTitle: ${existing.title}\nURL: ${existing.url}\n\nConfirm = overwrite existing bookmark\nCancel = keep existing bookmark`
-        );
+        const confirmed = await promptDuplicateOverwrite(existing.title, existing.url, "bookmark");
         if (!confirmed) return;
         updateBookmark(existing.id, {
           ...data,
@@ -1264,9 +1286,7 @@ export default function App() {
           continue;
         }
 
-        const confirmed = window.confirm(
-          `A bookmark for this link already exists.\n\nTitle: ${existing.title}\nURL: ${existing.url}\n\nConfirm = overwrite existing bookmark\nCancel = skip this dropped bookmark`
-        );
+        const confirmed = await promptDuplicateOverwrite(existing.title, existing.url, "drop");
         if (!confirmed) continue;
 
         updateBookmark(existing.id, {
@@ -1600,6 +1620,15 @@ export default function App() {
     );
   };
 
+  const handleClearSidebarTag = (tag: string, count: number) => {
+    if (count > 1) {
+      setPendingTagClear(tag);
+      return;
+    }
+    clearTag(tag);
+    if (selectedTag === tag) setSelectedTag(null);
+  };
+
   const handleClearNotTagged = () => {
     const untaggedCount = bookmarks.filter((b) => visibleTags(b.tags).length === 0).length;
     if (untaggedCount === 0) return;
@@ -1677,6 +1706,11 @@ export default function App() {
 
   const handleOpenAppShortcut = (app: AppShortcut) => {
     window.open(app.url, "_blank", "noopener,noreferrer");
+  };
+
+  const openAddBookmarkModal = (tag?: string | null) => {
+    const tags = tag ? [tag] : [];
+    setModal({ mode: "add", prefill: tags.length ? { url: "", title: "", favicon: "", tags } : undefined });
   };
 
   const handleAddBookmarkToApps = (bookmarkId: string) => {
@@ -2490,12 +2524,6 @@ export default function App() {
               ) : (
                 <>
                   <div style={{ flex: 1 }} />
-                  <SidebarNewButton
-                    onClick={toggleSidebarTagEditMode}
-                    title="Edit tags"
-                  >
-                    {sidebarTagEditMode ? "Done" : "Edit"}
-                  </SidebarNewButton>
                 </>
               )}
             </div>
@@ -2515,7 +2543,7 @@ export default function App() {
                   onToggleSelect={() => toggleSelectedSidebarTag(tag)}
                   onRename={(newName) => handleRenameSidebarTag(tag, newName)}
                   onDelete={() => setPendingTagDelete(tag)}
-                  onClear={() => clearTag(tag)}
+                  onClear={() => handleClearSidebarTag(tag, count)}
                   cleanupBypassed={cleanupBypassTags.includes(tag)}
                   onToggleCleanupBypass={() => {
                     setCleanupBypassTags((prev) =>
@@ -2975,7 +3003,7 @@ export default function App() {
 
             <Divider />
 
-            <button onClick={() => setModal({ mode: "add" })} style={{
+            <button onClick={() => openAddBookmarkModal()} style={{
               display: "flex", alignItems: "center", gap: 5,
               padding: "6px 12px", background: "#3b82f6", border: "none",
               borderRadius: 7, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer",
@@ -2988,7 +3016,7 @@ export default function App() {
           {/* Content */}
           <main style={{ flex: 1, overflowY: "auto", padding: effectiveGroupByDate ? "0 16px 16px 16px" : "16px 16px 16px 16px" }}>
             {sorted.length === 0 ? (
-              <Empty onAdd={() => setModal({ mode: "add" })} />
+              <Empty onAdd={() => openAddBookmarkModal(effectiveSelectedTag)} />
             ) : displayMode === "list" ? (
               <ListView
                 bookmarks={sorted}
@@ -3110,6 +3138,85 @@ export default function App() {
             onSave={handleSave}
             onClose={() => setModal({ mode: "closed" })}
           />
+        )}
+
+        {pendingDuplicate && (
+          <div
+            onClick={() => settleDuplicateOverwrite(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.65)",
+              backdropFilter: "blur(4px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1100,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "var(--card)",
+                border: "1px solid var(--border-hover)",
+                borderRadius: 14,
+                padding: 24,
+                width: 420,
+                maxWidth: "calc(100vw - 32px)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+                boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
+              }}
+            >
+              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)", lineHeight: 1.3 }}>
+                A bookmark for this link already exists.
+              </h2>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13, color: "var(--text-2)", lineHeight: 1.6 }}>
+                <div>Title: {pendingDuplicate.title || "Untitled"}</div>
+                <div style={{ wordBreak: "break-all" }}>URL: {pendingDuplicate.url}</div>
+              </div>
+              <p style={{ margin: 0, fontSize: 13, color: "var(--text-2)", lineHeight: 1.6 }}>
+                Confirm = overwrite existing bookmark
+                <br />
+                Cancel = keep existing bookmark
+              </p>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button
+                  onClick={() => settleDuplicateOverwrite(false)}
+                  style={{
+                    height: 34,
+                    padding: "0 14px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border-hover)",
+                    background: "var(--card)",
+                    color: "var(--text-2)",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: 600,
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => settleDuplicateOverwrite(true)}
+                  style={{
+                    height: 34,
+                    padding: "0 14px",
+                    borderRadius: 8,
+                    border: "1px solid #ef4444",
+                    background: "#ef4444",
+                    color: "#fff",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: 700,
+                  }}
+                >
+                  Overwrite bookmark
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {showImport && (
@@ -3649,6 +3756,83 @@ export default function App() {
                   }}
                 >
                   Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {pendingTagClear && (
+          <div
+            onClick={() => setPendingTagClear(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.65)",
+              backdropFilter: "blur(4px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1150,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "var(--card)",
+                border: "1px solid #ef444440",
+                borderRadius: 14,
+                padding: 24,
+                width: 420,
+                maxWidth: "calc(100vw - 32px)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+                boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
+              }}
+            >
+              <h2 style={{ fontSize: 16, fontWeight: 700, color: "#ef4444", margin: 0 }}>
+                Clear tag "{pendingTagClear}"?
+              </h2>
+              <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.6, margin: 0 }}>
+                This tag has multiple bookmarks. Are you sure you want to clear it?
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => setPendingTagClear(null)}
+                  style={{
+                    flex: 1,
+                    background: "var(--border)",
+                    border: "1px solid var(--border-hover)",
+                    borderRadius: 8,
+                    padding: "9px 0",
+                    color: "var(--text-2)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    clearTag(pendingTagClear);
+                    if (selectedTag === pendingTagClear) setSelectedTag(null);
+                    setPendingTagClear(null);
+                  }}
+                  style={{
+                    flex: 1,
+                    background: "#ef4444",
+                    border: "none",
+                    borderRadius: 8,
+                    padding: "9px 0",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Clear Tag
                 </button>
               </div>
             </div>
