@@ -12,6 +12,7 @@ export const ARCHIVED_TAG_ORDER_KEY = "ui_archived_tag_order_v1";
 export const CLEANUP_BYPASS_TAGS_KEY = "ui_cleanup_bypass_tags_v1";
 export const APP_SHORTCUTS_KEY = "ui_app_shortcuts_v1";
 export const APP_CATALOG_KEY = "ui_app_catalog_v1";
+export const TRIAL_START_KEY = "license_trial_start_v1";
 
 export const TAG_DYNAMIC_COLOR_MAP_KEY = "ui_tag_dynamic_colors_v1";
 export const TAG_LAST_ASSIGNED_COLOR_KEY = "ui_tag_last_assigned_color_v1";

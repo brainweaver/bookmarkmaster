@@ -9,11 +9,13 @@ import { useBookmarks } from "./hooks/useBookmarks";
 import { fetchMeta, resolveReachability } from "./utils/fetchMeta";
 import { localDateKey } from "./utils/date";
 import { SYSTEM_TAG_ARCHIVED, SYSTEM_TAG_NOT_REACHABLE, SYSTEM_TAG_NOT_UNIQUE, visibleTags } from "./constants/tags";
+import { APP_VERSION } from "./config/app";
 import type { Bookmark } from "./data/mockBookmarks";
 import { t } from "./i18n";
 import {
   APP_CATALOG_KEY,
   APP_SHORTCUTS_KEY,
+  TRIAL_START_KEY,
 } from "./storage/keys";
 import { persistenceGetItem, persistenceSetItem } from "./storage/persistence";
 import {
@@ -71,6 +73,13 @@ type AppEditorState =
   | { mode: "icon"; appId: string };
 
 const APP_UTILITIES_GROUP = "App Utilities";
+const TRIAL_DURATION_DAYS = 14;
+const TRIAL_DURATION_MS = TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000;
+
+function formatTrialLabel(daysLeft: number, ended: boolean): string {
+  if (ended) return "Trial Ended";
+  return `${daysLeft} Day Trial`;
+}
 
 function ensureUrlProtocol(raw: string): string {
   const trimmed = raw.trim();
@@ -951,6 +960,10 @@ export default function App() {
   const [appDragReadyId, setAppDragReadyId] = useState<string | null>(null);
   const appDragHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [appPickerError, setAppPickerError] = useState<string | null>(null);
+  const [trialStartAt, setTrialStartAt] = useState<number | null>(null);
+  const [trialReady, setTrialReady] = useState(false);
+  const [trialNow, setTrialNow] = useState(() => Date.now());
+  const [showTrialModal, setShowTrialModal] = useState(false);
   const [pendingDuplicate, setPendingDuplicate] = useState<{
     title: string;
     url: string;
@@ -984,6 +997,26 @@ export default function App() {
     () => (showAllApps || appShortcuts.length <= 20 ? appShortcuts : appShortcuts.slice(0, 20)),
     [appShortcuts, showAllApps],
   );
+  const trialRemainingMs = trialStartAt === null ? null : trialStartAt + TRIAL_DURATION_MS - trialNow;
+  // TODO: once licensing is finalized, use `trialEnded` to gate write actions
+  // (add/edit/delete/move/tag/import) while keeping view/search/export available.
+  const trialEnded = trialReady && trialRemainingMs !== null && trialRemainingMs <= 0;
+  const trialDaysLeft = trialRemainingMs !== null ? Math.max(0, Math.ceil(trialRemainingMs / (24 * 60 * 60 * 1000))) : TRIAL_DURATION_DAYS;
+  const trialLabel = trialReady ? formatTrialLabel(trialDaysLeft, trialEnded) : "Loading...";
+  const isDarkTheme = theme === "dark" || theme === "midnight" || theme === "black" || theme === "graphite" || theme === "high-contrast" || theme.includes("night");
+  const trialBadgeTextColor = isDarkTheme ? "#1d4ed8" : "#1d4ed8";
+  const trialBadgeBorder = trialEnded
+    ? "var(--border-hover)"
+    : !isDarkTheme
+      ? "rgba(37, 99, 235, 0.28)"
+      : "#93c5fd";
+  const trialBadgeBackground = trialEnded
+    ? "var(--card)"
+    : !isDarkTheme
+      ? "rgba(37, 99, 235, 0.08)"
+      : "#e0f2fe";
+  const trialModalIconBackground = isDarkTheme ? "rgba(59,130,246,0.14)" : "rgba(37, 99, 235, 0.10)";
+  const trialModalIconColor = isDarkTheme ? "#93c5fd" : "#1d4ed8";
 
   useEffect(() => {
     if (sidebarTagInitialSelectionRef.current) return;
@@ -1165,6 +1198,43 @@ export default function App() {
       cancelled = true;
     };
   }, [bookmarks]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const finish = (startAt: number) => {
+      if (cancelled) return;
+      setTrialStartAt(startAt);
+      setTrialReady(true);
+    };
+
+    if (typeof chrome !== "undefined" && chrome.storage?.local) {
+      chrome.storage.local.get([TRIAL_START_KEY], (items) => {
+        const raw = items[TRIAL_START_KEY];
+        if (typeof raw === "number" && Number.isFinite(raw)) {
+          finish(raw);
+          return;
+        }
+        const now = Date.now();
+        chrome.storage.local.set({ [TRIAL_START_KEY]: now }, () => finish(now));
+      });
+    } else {
+      const raw = persistenceGetItem(TRIAL_START_KEY);
+      const parsed = raw ? Number(raw) : NaN;
+      const now = Number.isFinite(parsed) ? parsed : Date.now();
+      if (!Number.isFinite(parsed)) persistenceSetItem(TRIAL_START_KEY, String(now));
+      finish(now);
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!trialReady) return;
+    const timer = window.setInterval(() => setTrialNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [trialReady]);
 
   const filtered = useMemo(() => {
     const tokens = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -2402,10 +2472,12 @@ export default function App() {
           }}>
             <div style={{
               display: "flex",
+              flexDirection: "column",
               alignItems: "center",
               minHeight: 52,
-              padding: "0 10px 2px 10px",
-              marginBottom: 4,
+              padding: "0 10px 6px 10px",
+              marginBottom: 6,
+              borderBottom: "1px solid var(--border)",
             }}>
               <img
                 src="/icons/logo.png"
@@ -2418,6 +2490,9 @@ export default function App() {
                   background: "transparent",
                 }}
               />
+              <div style={{ marginTop: 4, fontSize: 11, fontWeight: 700, color: "var(--text-4)", letterSpacing: "0.08em" }}>
+                VERSION {APP_VERSION}
+              </div>
             </div>
             <div style={{ padding: "0 8px 8px 16px", display: "flex", alignItems: "center" }}>
                 <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", letterSpacing: "0.08em", textTransform: "uppercase", flex: 1 }}>
@@ -2430,8 +2505,9 @@ export default function App() {
                 + New
               </SidebarNewButton>
             </div>
+            <div style={{ padding: "0 10px 10px 10px" }}>
               <div
-                style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-start", gap: 8, padding: "0 10px 12px 14px" }}
+                style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-start", gap: 8, padding: "0 0 17px 4px" }}
                 onDragOver={(e) => {
                   const hasAppData = e.dataTransfer.types.includes(APP_SHORTCUT_DRAG_MIME);
                   const hasBookmarkData = e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME) || e.dataTransfer.types.includes(BOOKMARK_SELECTION_DRAG_MIME);
@@ -2439,73 +2515,75 @@ export default function App() {
                   e.preventDefault();
                   e.dataTransfer.dropEffect = "move";
                 }}
-              onDrop={(e) => {
-                const draggedBookmarkId = getDraggedBookmarkId(e);
-                if (draggedBookmarkId) {
-                  e.preventDefault();
-                  handleAddBookmarkToApps(draggedBookmarkId);
-                }
-              }}
-            >
-              {visibleAppShortcuts.map((app) => {
-                return (
-                  <div
-                    key={app.id}
-                    style={{ position: "relative", width: 24, height: 24 }}
-                    onDragOver={(e) => {
-                      const hasAppData = e.dataTransfer.types.includes(APP_SHORTCUT_DRAG_MIME);
-                      const hasBookmarkData = e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME) || e.dataTransfer.types.includes(BOOKMARK_SELECTION_DRAG_MIME);
-                      if (!hasAppData && !hasBookmarkData) return;
-                      e.preventDefault();
-                      e.dataTransfer.dropEffect = "move";
-                    }}
-                    onDrop={(e) => {
-                      const draggedBookmarkId = getDraggedBookmarkId(e);
-                      if (draggedBookmarkId) {
+                onDrop={(e) => {
+                  const draggedBookmarkId = getDraggedBookmarkId(e);
+                  if (draggedBookmarkId) {
+                    e.preventDefault();
+                    handleAddBookmarkToApps(draggedBookmarkId);
+                  }
+                }}
+              >
+                {visibleAppShortcuts.map((app) => {
+                  return (
+                    <div
+                      key={app.id}
+                      style={{ position: "relative", width: 24, height: 24 }}
+                      onDragOver={(e) => {
+                        const hasAppData = e.dataTransfer.types.includes(APP_SHORTCUT_DRAG_MIME);
+                        const hasBookmarkData = e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME) || e.dataTransfer.types.includes(BOOKMARK_SELECTION_DRAG_MIME);
+                        if (!hasAppData && !hasBookmarkData) return;
                         e.preventDefault();
-                        e.stopPropagation();
-                        handleAddBookmarkToApps(draggedBookmarkId);
-                        return;
-                      }
-                      handleReorderAppShortcut(app.id, e);
-                    }}
-                  >
-                    <button
-                      draggable
-                      onDragStart={(e) => handleAppShortcutDragStart(app.id, e)}
-                      onDragEnd={() => {
-                        setAppDraggingId(null);
-                        setAppDragReadyId(null);
+                        e.dataTransfer.dropEffect = "move";
                       }}
-                      onMouseEnter={() => handleAppShortcutMouseEnter(app.id)}
-                      onMouseLeave={() => handleAppShortcutMouseLeave(app.id)}
-                      title={`${app.name} — ${app.url}`}
-                      onClick={() => { handleOpenAppShortcut(app); }}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        setAppContextMenu({ x: e.clientX, y: e.clientY, appId: app.id });
-                      }}
-                      style={{
-                        width: 24,
-                        height: 24,
-                        borderRadius: 6,
-                        border: "1px solid var(--border)",
-                        background: "var(--card)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: appDraggingId === app.id ? "grabbing" : appDragReadyId === app.id ? "grab" : "default",
-                        padding: 0,
-                        opacity: appDraggingId === app.id ? 0.5 : 1,
-                        transition: "opacity 0.12s ease, transform 0.12s ease",
-                        transform: appDraggingId === app.id ? "scale(0.95)" : "none",
+                      onDrop={(e) => {
+                        const draggedBookmarkId = getDraggedBookmarkId(e);
+                        if (draggedBookmarkId) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleAddBookmarkToApps(draggedBookmarkId);
+                          return;
+                        }
+                        handleReorderAppShortcut(app.id, e);
                       }}
                     >
-                        <AppIcon app={app} width={24} height={24} radius={4} />
-                      </button>
-                    </div>
-                  );
-                })}
+                      <button
+                        draggable
+                        onDragStart={(e) => handleAppShortcutDragStart(app.id, e)}
+                        onDragEnd={() => {
+                          setAppDraggingId(null);
+                          setAppDragReadyId(null);
+                        }}
+                        onMouseEnter={() => handleAppShortcutMouseEnter(app.id)}
+                        onMouseLeave={() => handleAppShortcutMouseLeave(app.id)}
+                        title={`${app.name} — ${app.url}`}
+                        onClick={() => { handleOpenAppShortcut(app); }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setAppContextMenu({ x: e.clientX, y: e.clientY, appId: app.id });
+                        }}
+                        style={{
+                          width: 24,
+                          height: 24,
+                          borderRadius: 6,
+                          border: "1px solid var(--border)",
+                          background: "var(--card)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          cursor: appDraggingId === app.id ? "grabbing" : appDragReadyId === app.id ? "grab" : "default",
+                          padding: 0,
+                          opacity: appDraggingId === app.id ? 0.5 : 1,
+                          transition: "opacity 0.12s ease, transform 0.12s ease",
+                          transform: appDraggingId === app.id ? "scale(0.95)" : "none",
+                        }}
+                      >
+                          <AppIcon app={app} width={24} height={24} radius={4} />
+                        </button>
+                      </div>
+                    );
+                  })}
+              </div>
+              <div style={{ margin: "0 6px 6px", height: 1, background: "var(--border)" }} />
             </div>
             {appShortcuts.length > 20 && (
               <div style={{ padding: "0 10px 8px 14px" }}>
@@ -2658,7 +2736,7 @@ export default function App() {
               </div>
             )}
 
-            <div style={{ padding: "0 8px 14px 16px", display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ padding: "0 8px 10px 16px", display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", letterSpacing: "0.07em", textTransform: "uppercase", flex: 1 }}>
                 {t("tags")}
               </span>
@@ -3003,6 +3081,54 @@ export default function App() {
             >
               <IconExpandTabs />
             </button>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+              <button
+                onClick={() => setShowTrialModal(true)}
+                title={trialEnded ? "Trial ended" : `${trialLabel} - License`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  height: 28,
+                  padding: "0 10px",
+                  borderRadius: 9999,
+                  border: `1px solid ${trialBadgeBorder}`,
+                  backgroundColor: trialBadgeBackground,
+                  backgroundImage: "none",
+                  boxShadow: isDarkTheme ? "inset 0 0 0 1px rgba(255,255,255,0.28)" : "none",
+                  color: trialBadgeTextColor,
+                  cursor: "pointer",
+                  flexShrink: 0,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <IconKey outlined={!isDarkTheme} />
+                <span style={{ fontSize: 12, fontWeight: 700 }}>{trialLabel}</span>
+              </button>
+              <button
+                onClick={() => setShowTrialModal(true)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  height: 28,
+                  padding: "0 10px",
+                  borderRadius: 9999,
+                  border: "none",
+                  background: "#3b82f6",
+                  color: "#fff",
+                  cursor: "pointer",
+                  flexShrink: 0,
+                  whiteSpace: "nowrap",
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+              >
+                Upgrade Now
+              </button>
+            </div>
+
             <div style={{ flex: 1 }} />
 
             <div style={{ display: "flex", alignItems: "center", gap: 6, width: 260, flexShrink: 0 }}>
@@ -4165,6 +4291,85 @@ export default function App() {
           </div>
         )}
 
+        {showTrialModal && (
+          <div
+            onClick={() => setShowTrialModal(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.65)",
+              backdropFilter: "blur(4px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 4000,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: 380,
+                background: "var(--card)",
+                border: "1px solid var(--border-hover)",
+                borderRadius: 16,
+                padding: 20,
+                boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 16,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 9999, background: trialModalIconBackground, display: "flex", alignItems: "center", justifyContent: "center", color: trialModalIconColor, flexShrink: 0 }}>
+                  <IconKey outlined={!isDarkTheme} />
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", lineHeight: 1.2 }}>
+                    {trialLabel}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}>
+                    {trialEnded
+                      ? "Your trial has ended. View and export still work, but editing is locked."
+                      : `You have ${trialDaysLeft} day${trialDaysLeft === 1 ? "" : "s"} left to edit your links.`}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button
+                  onClick={() => setShowTrialModal(false)}
+                  style={{
+                    background: "var(--border)",
+                    border: "1px solid var(--border-hover)",
+                    borderRadius: 8,
+                    padding: "8px 12px",
+                    color: "var(--text-2)",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Close
+                </button>
+                <button
+                  onClick={() => setShowTrialModal(false)}
+                  style={{
+                    background: "#3b82f6",
+                    border: "none",
+                    borderRadius: 8,
+                    padding: "8px 12px",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Upgrade Now
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {pendingSearchTagAssign && (
           <div
             onClick={() => {
@@ -5273,6 +5478,22 @@ function SidebarNewButton({
     >
       {children}
     </button>
+  );
+}
+
+function IconKey({ outlined = false }: { outlined?: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill={outlined ? "none" : "currentColor"} aria-hidden="true">
+      <g transform="rotate(90 12 12)">
+        <path
+          d="m22 0h-1.436a2.978 2.978 0 0 0 -2.121.879l-8.527 8.521a7.518 7.518 0 1 0 4.684 4.684l2.4-2.4v-3.684h3v-3h3.551a2.978 2.978 0 0 0 .449-1.564v-1.436a2 2 0 0 0 -2-2zm-16.5 20a1.5 1.5 0 1 1 1.5-1.5 1.5 1.5 0 0 1 -1.5 1.5z"
+          fill={outlined ? "none" : "currentColor"}
+          stroke={outlined ? "currentColor" : "none"}
+          strokeWidth={outlined ? 1.4 : 0}
+          strokeLinejoin="round"
+        />
+      </g>
+    </svg>
   );
 }
 

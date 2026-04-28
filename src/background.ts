@@ -1,6 +1,12 @@
 // Chrome MV3 service worker — handles toolbar click and context menu
 
 chrome.runtime.onInstalled.addListener(() => {
+  chrome.storage.local.get(["license_trial_start_v1"], (items) => {
+    if (typeof items.license_trial_start_v1 !== "number") {
+      chrome.storage.local.set({ license_trial_start_v1: Date.now() });
+    }
+  });
+
   const menuLabel =
     chrome.i18n?.getMessage("contextSaveToYahaBaby") || "Save to YahaBaby Bookmarks";
   chrome.contextMenus.create({
