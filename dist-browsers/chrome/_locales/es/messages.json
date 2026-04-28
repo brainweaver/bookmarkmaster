@@ -1,14 +1,14 @@
 {
   "extName": {
-    "message": "BookmarkMaster"
+    "message": "YahaBaby Bookmarks"
   },
   "extDescription": {
     "message": "Guarda y organiza marcadores con etiquetas, búsqueda y múltiples vistas"
   },
   "actionTitle": {
-    "message": "BookmarkMaster"
+    "message": "YahaBaby Bookmarks"
   },
-  "contextSaveToBookmarkMaster": {
-    "message": "Guardar en BookmarkMaster"
+  "contextSaveToYahaBaby": {
+    "message": "Guardar en YahaBaby Bookmarks"
   }
 }

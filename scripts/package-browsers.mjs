@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, "..");
 
 const buildsRoot = path.join(root, "dist-browsers");
 const packagesRoot = path.join(root, "browser-packages");
-const legacyTesterZip = path.join(root, "BookmarkMaster-extension.zip");
+const legacyTesterZip = path.join(root, "YahaBaby-Bookmarks-extension.zip");
 const targets = ["chrome", "edge", "opera", "firefox", "safari"];
 
 if (!fs.existsSync(buildsRoot)) {
@@ -28,7 +28,7 @@ for (const target of targets) {
     process.exit(1);
   }
 
-  const zipName = `BookmarkMaster-${target}.zip`;
+  const zipName = `YahaBaby-Bookmarks-${target}.zip`;
   const zipPath = path.join(packagesRoot, zipName);
   execSync(`cd "${targetDir}" && zip -r "${zipPath}" .`, { stdio: "inherit" });
   console.log(`Packaged: ${path.relative(root, zipPath)}`);

@@ -1,6 +1,6 @@
-# BookmarkMaster
+# YahaBaby Bookmarks
 
-BookmarkMaster is a browser extension + React app for saving, organizing, and cleaning up bookmarks.
+YahaBaby Bookmarks is a browser extension + React app for saving, organizing, and cleaning up bookmarks.
 
 ## Local Development
 
@@ -30,7 +30,7 @@ npm run build
 2. Turn on **Developer mode** (top-right).
 3. Click **Load unpacked**.
 4. Select this project’s `dist` folder:
-   `/Users/abdul/Src/BookmarkMaster/dist`
+   `/Users/abdul/Src/bookmarkmaster/dist`
 5. Pin/use the extension from the toolbar.
 
 ## Update Extension After Code Changes
@@ -42,7 +42,7 @@ npm run build
 ```
 
 2. Go to `chrome://extensions`.
-3. Click the **Reload** button on BookmarkMaster.
+3. Click the **Reload** button on YahaBaby Bookmarks.
 
 ## Notes
 
@@ -84,18 +84,18 @@ npm run package:browsers
 
 Outputs:
 
-- `browser-packages/BookmarkMaster-chrome.zip`
-- `browser-packages/BookmarkMaster-edge.zip`
-- `browser-packages/BookmarkMaster-opera.zip`
-- `browser-packages/BookmarkMaster-firefox.zip`
-- `browser-packages/BookmarkMaster-safari.zip`
+- `browser-packages/YahaBaby-Bookmarks-chrome.zip`
+- `browser-packages/YahaBaby-Bookmarks-edge.zip`
+- `browser-packages/YahaBaby-Bookmarks-opera.zip`
+- `browser-packages/YahaBaby-Bookmarks-firefox.zip`
+- `browser-packages/YahaBaby-Bookmarks-safari.zip`
 
 ## Safari Note
 
 Safari distribution normally uses Apple’s conversion/signing flow:
 
 ```bash
-xcrun safari-web-extension-converter /Users/abdul/Src/BookmarkMaster/dist-browsers/safari --project-location /Users/abdul/Src/BookmarkMaster/safari
+xcrun safari-web-extension-converter /Users/abdul/Src/bookmarkmaster/dist-browsers/safari --project-location /Users/abdul/Src/bookmarkmaster/safari
 ```
 
 Then open the generated Xcode project to sign and run/publish.

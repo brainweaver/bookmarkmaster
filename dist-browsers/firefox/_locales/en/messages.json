@@ -1,14 +1,14 @@
 {
   "extName": {
-    "message": "BookmarkMaster"
+    "message": "YahaBaby Bookmarks"
   },
   "extDescription": {
     "message": "Save and organize bookmarks with tags, search, and multiple views"
   },
   "actionTitle": {
-    "message": "BookmarkMaster"
+    "message": "YahaBaby Bookmarks"
   },
-  "contextSaveToBookmarkMaster": {
-    "message": "Save to BookmarkMaster"
+  "contextSaveToYahaBaby": {
+    "message": "Save to YahaBaby Bookmarks"
   }
 }

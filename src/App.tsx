@@ -929,7 +929,6 @@ export default function App() {
   const [moveBookmarksNewTag, setMoveBookmarksNewTag] = useState("");
   const [pendingSearchTagAssign, setPendingSearchTagAssign] = useState<string[] | null>(null);
   const [searchTagSearch, setSearchTagSearch] = useState("");
-  const [searchTagNewTag, setSearchTagNewTag] = useState("");
   const [appCatalog, setAppCatalog] = useState<AppGroup[]>(loadAppCatalog);
   const [appShortcuts, setAppShortcuts] = useState<AppShortcut[]>(loadAppShortcuts);
   const [showAppPicker, setShowAppPicker] = useState(false);
@@ -1651,11 +1650,10 @@ export default function App() {
     );
     setPendingSearchTagAssign(null);
     setSearchTagSearch("");
-    setSearchTagNewTag("");
   };
 
   const createAndApplySearchTag = () => {
-    const targetTag = normalizeTagName(searchTagNewTag);
+    const targetTag = normalizeTagName(searchTagSearch);
     if (!targetTag) return;
     addTag(targetTag);
     applySearchTagToBookmarks(targetTag);
@@ -2400,12 +2398,31 @@ export default function App() {
         }}>
           <div style={{
             width: 196, display: "flex", flexDirection: "column",
-            padding: "20px 0", minHeight: "100%",
+            padding: "8px 0", minHeight: "100%",
           }}>
-            <div style={{ padding: "0 8px 6px 16px", display: "flex", alignItems: "center" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", letterSpacing: "0.07em", textTransform: "uppercase", flex: 1 }}>
-                Apps
-              </span>
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              minHeight: 52,
+              padding: "0 10px 2px 10px",
+              marginBottom: 4,
+            }}>
+              <img
+                src="/icons/logo.png"
+                alt="YahaBaby Bookmarks"
+                width={172}
+                height={48}
+                style={{
+                  display: "block",
+                  flexShrink: 0,
+                  background: "transparent",
+                }}
+              />
+            </div>
+            <div style={{ padding: "0 8px 8px 16px", display: "flex", alignItems: "center" }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-4)", letterSpacing: "0.08em", textTransform: "uppercase", flex: 1 }}>
+                  Apps
+                </span>
               <SidebarNewButton
                 onClick={() => { setShowAppPicker(true); setAppPickerError(null); setAppSearch(""); }}
                 title="Add app shortcut"
@@ -2414,7 +2431,7 @@ export default function App() {
               </SidebarNewButton>
             </div>
               <div
-                style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-start", gap: 10, padding: "0 10px 12px 14px" }}
+                style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-start", gap: 8, padding: "0 10px 12px 14px" }}
                 onDragOver={(e) => {
                   const hasAppData = e.dataTransfer.types.includes(APP_SHORTCUT_DRAG_MIME);
                   const hasBookmarkData = e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME) || e.dataTransfer.types.includes(BOOKMARK_SELECTION_DRAG_MIME);
@@ -2484,14 +2501,14 @@ export default function App() {
                         transform: appDraggingId === app.id ? "scale(0.95)" : "none",
                       }}
                     >
-                      <AppIcon app={app} width={24} height={24} radius={4} />
-                    </button>
-                  </div>
-                );
-              })}
+                        <AppIcon app={app} width={24} height={24} radius={4} />
+                      </button>
+                    </div>
+                  );
+                })}
             </div>
             {appShortcuts.length > 20 && (
-              <div style={{ padding: "0 10px 12px 14px" }}>
+              <div style={{ padding: "0 10px 8px 14px" }}>
                 <button
                   onClick={() => setShowAllApps((v) => !v)}
                   style={{
@@ -2813,7 +2830,8 @@ export default function App() {
           {/* Toolbar */}
           <header style={{
             display: "flex", alignItems: "center", gap: 8,
-            padding: "9px 16px", borderBottom: "1px solid var(--border)",
+            height: 48,
+            padding: "0 16px", borderBottom: "1px solid var(--border)",
             background: "var(--surface)", flexShrink: 0,
           }}>
             <button
@@ -2985,43 +3003,6 @@ export default function App() {
             >
               <IconExpandTabs />
             </button>
-            <a href="https://www.bookmarkmaster.com" target="_blank" rel="noreferrer"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 15,
-                fontWeight: 700,
-                marginRight: 4,
-                color: "var(--text)",
-                textDecoration: "none",
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
-              onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
-            >
-              <img
-                src="/favicon.png"
-                alt="BookMarkMaster icon"
-                width={16}
-                height={16}
-                style={{ borderRadius: 4, flexShrink: 0 }}
-              />
-              <span>BookmarkMaster.com</span>
-            </a>
-            <span
-              style={{
-                marginLeft: 2,
-                alignSelf: "flex-end",
-                marginBottom: 1,
-                color: "var(--text-4)",
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: "0.02em",
-              }}
-            >
-              v1.0.3
-            </span>
-
             <div style={{ flex: 1 }} />
 
             <div style={{ display: "flex", alignItems: "center", gap: 6, width: 260, flexShrink: 0 }}>
@@ -3079,7 +3060,6 @@ export default function App() {
                   onClick={() => {
                     setPendingSearchTagAssign(sorted.map((b) => b.id));
                     setSearchTagSearch("");
-                    setSearchTagNewTag("");
                   }}
                   aria-label="Tag search results"
                   title="Tag search results"
@@ -4190,7 +4170,6 @@ export default function App() {
             onClick={() => {
               setPendingSearchTagAssign(null);
               setSearchTagSearch("");
-              setSearchTagNewTag("");
             }}
             style={{
               position: "fixed",
@@ -4226,7 +4205,6 @@ export default function App() {
                   onClick={() => {
                     setPendingSearchTagAssign(null);
                     setSearchTagSearch("");
-                    setSearchTagNewTag("");
                   }}
                   style={{
                     background: "none",
@@ -4246,38 +4224,15 @@ export default function App() {
                 Assign {pendingSearchTagAssign.length.toLocaleString()} search result{pendingSearchTagAssign.length === 1 ? "" : "s"} to a tag.
               </p>
 
-              <input
-                type="text"
-                value={searchTagSearch}
-                onChange={(e) => setSearchTagSearch(e.target.value)}
-                placeholder="Search tags"
-                style={{
-                  width: "100%",
-                  background: "var(--bg)",
-                  border: "1px solid var(--border-hover)",
-                  borderRadius: 8,
-                  padding: "8px 12px",
-                  color: "var(--text)",
-                  fontSize: 13,
-                  outline: "none",
-                }}
-              />
-
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  alignItems: "center",
-                }}
-              >
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input
                   type="text"
-                  value={searchTagNewTag}
-                  onChange={(e) => setSearchTagNewTag(e.target.value)}
+                  value={searchTagSearch}
+                  onChange={(e) => setSearchTagSearch(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") createAndApplySearchTag();
                   }}
-                  placeholder="Create new tag"
+                  placeholder="Search or add tag"
                   style={{
                     flex: 1,
                     background: "var(--bg)",
@@ -4289,6 +4244,7 @@ export default function App() {
                     outline: "none",
                   }}
                 />
+
                 <button
                   onClick={createAndApplySearchTag}
                   style={{
@@ -4301,9 +4257,10 @@ export default function App() {
                     fontWeight: 700,
                     cursor: "pointer",
                     whiteSpace: "nowrap",
+                    flexShrink: 0,
                   }}
                 >
-                  Create & Tag
+                  + Add
                 </button>
               </div>
 
