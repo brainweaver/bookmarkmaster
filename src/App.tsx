@@ -8,7 +8,7 @@ import { cycleTagColor, tagColor } from "./utils/tagColors";
 import { useBookmarks } from "./hooks/useBookmarks";
 import { fetchMeta, resolveReachability } from "./utils/fetchMeta";
 import { localDateKey } from "./utils/date";
-import { SYSTEM_TAG_NOT_REACHABLE, SYSTEM_TAG_NOT_UNIQUE, visibleTags } from "./constants/tags";
+import { SYSTEM_TAG_ARCHIVED, SYSTEM_TAG_NOT_REACHABLE, SYSTEM_TAG_NOT_UNIQUE, visibleTags } from "./constants/tags";
 import type { Bookmark } from "./data/mockBookmarks";
 import { t } from "./i18n";
 import {
@@ -17,7 +17,6 @@ import {
 } from "./storage/keys";
 import { persistenceGetItem, persistenceSetItem } from "./storage/persistence";
 import {
-  readArchivedTagOrderPreference,
   readCleanupBypassTagsPreference,
   readDisplayModePreference,
   readGroupByDatePreference,
@@ -27,7 +26,6 @@ import {
   readThemePreference,
   readZoomPreference,
   sanitizeBackupPreferences,
-  writeArchivedTagOrderPreference,
   writeCleanupBypassTagsPreference,
   writeDisplayModePreference,
   writeGroupByDatePreference,
@@ -43,12 +41,13 @@ function gridColumnsFromZoom(zoom: number): number {
   return Math.max(2, Math.min(8, Math.round(8 - normalized * 6)));
 }
 const NOT_TAGGED_FILTER = "__not_tagged__";
+const ARCHIVED_FILTER = SYSTEM_TAG_ARCHIVED;
 const NOT_UNIQUE_FILTER = SYSTEM_TAG_NOT_UNIQUE;
 const NOT_REACHABLE_FILTER = SYSTEM_TAG_NOT_REACHABLE;
 const BOOKMARK_DRAG_MIME = "application/x-bookmark-id";
+const BOOKMARK_SELECTION_DRAG_MIME = "application/x-bookmark-selection";
 const BOOKMARK_DRAG_FALLBACK_PREFIX = "bookmark:";
 const TAG_DRAG_MIME = "application/x-sidebar-tag";
-const TAG_SECTION_DRAG_MIME = "application/x-sidebar-tag-section";
 const APP_SHORTCUT_DRAG_MIME = "application/x-app-shortcut-id";
 const APP_SHORTCUT_DRAG_FALLBACK_PREFIX = "app-shortcut:";
 
@@ -734,7 +733,6 @@ type BackupPreferences = {
   rankOrder?: string[];
   zoom?: number;
   tagOrder?: string[];
-  archivedTagOrder?: string[];
   sidebarOpen?: boolean;
   appShortcuts?: AppShortcut[];
   appCatalog?: AppGroup[];
@@ -869,10 +867,6 @@ function loadTagOrder(): string[] {
   return readTagOrderPreference();
 }
 
-function loadArchivedTagOrder(): string[] {
-  return readArchivedTagOrderPreference();
-}
-
 function loadCleanupBypassTags(): string[] {
   return readCleanupBypassTagsPreference();
 }
@@ -896,6 +890,14 @@ export default function App() {
   const sidebarTagInitialSelectionRef = useRef(false);
   const [modal, setModal] = useState<ModalState>({ mode: "closed" });
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [selectedBookmarkIds, setSelectedBookmarkIds] = useState<string[]>([]);
+  const [bookmarkSelectionDrag, setBookmarkSelectionDrag] = useState<{
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+  } | null>(null);
+  const bookmarkSelectionDragRef = useRef<typeof bookmarkSelectionDrag>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [newTagInput, setNewTagInput] = useState<string | null>(null);
   const newTagRef = useRef<HTMLInputElement>(null);
@@ -908,21 +910,26 @@ export default function App() {
   const [showDataMenu, setShowDataMenu] = useState(false);
   const dataMenuRef = useRef<HTMLDivElement>(null);
   const themeMenuRef = useRef<HTMLDivElement>(null);
+  const mainContentRef = useRef<HTMLDivElement>(null);
   const restoreFileRef = useRef<HTMLInputElement>(null);
   const [showDeleteAll, setShowDeleteAll] = useState(false);
   const [showClearAllTags, setShowClearAllTags] = useState(false);
   const [pendingTagDelete, setPendingTagDelete] = useState<string | null>(null);
   const [, setTagColorVersion] = useState(0);
   const [tagOrder, setTagOrder] = useState<string[]>(loadTagOrder);
-  const [archivedTagOrder, setArchivedTagOrder] = useState<string[]>(loadArchivedTagOrder);
-  const [showArchivedTags, setShowArchivedTags] = useState(false);
   const [cleanupBypassTags, setCleanupBypassTags] = useState<string[]>(loadCleanupBypassTags);
-  const [sidebarTagContextMenu, setSidebarTagContextMenu] = useState<{ tag: string; x: number; y: number; openUp: boolean; archived: boolean } | null>(null);
+  const [sidebarTagContextMenu, setSidebarTagContextMenu] = useState<{ tag: string; x: number; y: number; openUp: boolean } | null>(null);
   const [sidebarTagEditMode, setSidebarTagEditMode] = useState(false);
   const [selectedSidebarTags, setSelectedSidebarTags] = useState<string[]>([]);
   const [pendingBulkDeleteTags, setPendingBulkDeleteTags] = useState<string[] | null>(null);
   const [pendingTagClear, setPendingTagClear] = useState<string | null>(null);
   const [pendingTagBookmarkDelete, setPendingTagBookmarkDelete] = useState<{ tag: string; count: number } | null>(null);
+  const [pendingMoveBookmarks, setPendingMoveBookmarks] = useState<string | null>(null);
+  const [moveBookmarksSearch, setMoveBookmarksSearch] = useState("");
+  const [moveBookmarksNewTag, setMoveBookmarksNewTag] = useState("");
+  const [pendingSearchTagAssign, setPendingSearchTagAssign] = useState<string[] | null>(null);
+  const [searchTagSearch, setSearchTagSearch] = useState("");
+  const [searchTagNewTag, setSearchTagNewTag] = useState("");
   const [appCatalog, setAppCatalog] = useState<AppGroup[]>(loadAppCatalog);
   const [appShortcuts, setAppShortcuts] = useState<AppShortcut[]>(loadAppShortcuts);
   const [showAppPicker, setShowAppPicker] = useState(false);
@@ -970,28 +977,14 @@ export default function App() {
       .filter((group) => group.apps.length > 0);
   }, [appCatalog, appSearch]);
   const orderedSidebarTags = useMemo(() => {
-    const archivedSet = new Set(archivedTagOrder);
-    const orderedExisting = tagOrder.filter((t) => allTags.includes(t) && !archivedSet.has(t));
-    const remaining = allTags.filter((t) => !orderedExisting.includes(t) && !archivedSet.has(t));
+    const orderedExisting = tagOrder.filter((t) => allTags.includes(t));
+    const remaining = allTags.filter((t) => !orderedExisting.includes(t));
     return [...orderedExisting, ...remaining];
-  }, [allTags, archivedTagOrder, tagOrder]);
-  const archivedSidebarTags = useMemo(
-    () => archivedTagOrder.filter((t) => allTags.includes(t)),
-    [allTags, archivedTagOrder],
-  );
+  }, [allTags, tagOrder]);
   const visibleAppShortcuts = useMemo(
     () => (showAllApps || appShortcuts.length <= 20 ? appShortcuts : appShortcuts.slice(0, 20)),
     [appShortcuts, showAllApps],
   );
-
-  useEffect(() => {
-    if (archivedTagOrder.length === 0) return;
-    const archivedSet = new Set(archivedTagOrder);
-    setTagOrder((prev) => {
-      const next = prev.filter((tag) => !archivedSet.has(tag));
-      return next.length === prev.length ? prev : next;
-    });
-  }, [archivedTagOrder]);
 
   useEffect(() => {
     if (sidebarTagInitialSelectionRef.current) return;
@@ -1127,10 +1120,6 @@ export default function App() {
   }, [tagOrder]);
 
   useEffect(() => {
-    writeArchivedTagOrderPreference(archivedTagOrder);
-  }, [archivedTagOrder]);
-
-  useEffect(() => {
     writeCleanupBypassTagsPreference(cleanupBypassTags);
   }, [cleanupBypassTags]);
 
@@ -1185,9 +1174,12 @@ export default function App() {
 
     return bookmarks.filter((b) => {
       const userTags = visibleTags(b.tags);
+      const isArchived = b.tags.includes(ARCHIVED_FILTER);
       if (selectedTag === NOT_TAGGED_FILTER && userTags.length > 0) return false;
       if (selectedTag === NOT_UNIQUE_FILTER && !b.tags.includes(SYSTEM_TAG_NOT_UNIQUE)) return false;
       if (selectedTag === NOT_REACHABLE_FILTER && !b.tags.includes(SYSTEM_TAG_NOT_REACHABLE)) return false;
+      if (selectedTag === ARCHIVED_FILTER && !isArchived) return false;
+      if (selectedTag !== ARCHIVED_FILTER && isArchived) return false;
       if (effectiveSelectedTag && !b.tags.includes(effectiveSelectedTag)) return false;
       if (tagTokens.some((tag) => !userTags.includes(tag))) return false;
       if (textTokens.some((q) =>
@@ -1266,7 +1258,11 @@ export default function App() {
   const columns = gridColumnsFromZoom(zoom);
 
   const handleDragOver = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME) || e.dataTransfer.types.includes(TAG_DRAG_MIME)) return;
+    if (
+      e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME) ||
+      e.dataTransfer.types.includes(BOOKMARK_SELECTION_DRAG_MIME) ||
+      e.dataTransfer.types.includes(TAG_DRAG_MIME)
+    ) return;
     e.preventDefault();
     setDragging(true);
   };
@@ -1278,7 +1274,11 @@ export default function App() {
   const [dropResult, setDropResult] = useState<string | null>(null);
 
   const handleDrop = async (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME) || e.dataTransfer.types.includes(TAG_DRAG_MIME)) {
+    if (
+      e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME) ||
+      e.dataTransfer.types.includes(BOOKMARK_SELECTION_DRAG_MIME) ||
+      e.dataTransfer.types.includes(TAG_DRAG_MIME)
+    ) {
       setDragging(false);
       return;
     }
@@ -1446,6 +1446,8 @@ export default function App() {
         ? "Not Tagged"
         : selectedTag === NOT_REACHABLE_FILTER
         ? "Not Reachable"
+        : selectedTag === ARCHIVED_FILTER
+        ? "Archived"
         : selectedTag;
 
     // Open exactly what the user is currently seeing in the filtered view,
@@ -1483,11 +1485,90 @@ export default function App() {
 
   const handleBookmarkDragStart = (bookmarkId: string, e: React.DragEvent) => {
     e.dataTransfer.effectAllowed = "move";
+    if (selectedBookmarkIds.includes(bookmarkId) && selectedBookmarkIds.length > 1) {
+      e.dataTransfer.setData(BOOKMARK_SELECTION_DRAG_MIME, JSON.stringify(selectedBookmarkIds));
+      e.dataTransfer.setData("text/plain", `bookmark-selection:${bookmarkId}`);
+      return;
+    }
     e.dataTransfer.setData(BOOKMARK_DRAG_MIME, bookmarkId);
     e.dataTransfer.setData("text/plain", `${BOOKMARK_DRAG_FALLBACK_PREFIX}${bookmarkId}`);
   };
 
+  const handleBookmarkSelectionStart = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (displayMode === "list") return;
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest("[data-bookmark-id], a, button, input, textarea, select, [role='button']")) return;
+    if (!mainContentRef.current) return;
+    setBookmarkSelectionDrag({
+      startX: e.clientX,
+      startY: e.clientY,
+      currentX: e.clientX,
+      currentY: e.clientY,
+    });
+  };
+
+  useEffect(() => {
+    bookmarkSelectionDragRef.current = bookmarkSelectionDrag;
+  }, [bookmarkSelectionDrag]);
+
+  useEffect(() => {
+    if (!bookmarkSelectionDrag) return;
+    const handleMove = (e: MouseEvent) => {
+      setBookmarkSelectionDrag((prev) => {
+        if (!prev) return prev;
+        const next = { ...prev, currentX: e.clientX, currentY: e.clientY };
+        bookmarkSelectionDragRef.current = next;
+        return next;
+      });
+    };
+    const handleUp = () => {
+      const rect = mainContentRef.current;
+      const drag = bookmarkSelectionDragRef.current;
+      if (!rect) {
+        setBookmarkSelectionDrag(null);
+        return;
+      }
+      if (!drag) {
+        setBookmarkSelectionDrag(null);
+        return;
+      }
+      const left = Math.min(drag.startX, drag.currentX);
+      const right = Math.max(drag.startX, drag.currentX);
+      const top = Math.min(drag.startY, drag.currentY);
+      const bottom = Math.max(drag.startY, drag.currentY);
+      const ids = Array.from(rect.querySelectorAll<HTMLElement>("[data-bookmark-id]"))
+        .filter((el) => {
+          const box = el.getBoundingClientRect();
+          return box.left < right && box.right > left && box.top < bottom && box.bottom > top;
+        })
+        .map((el) => el.dataset.bookmarkId || "")
+        .filter(Boolean);
+      setSelectedBookmarkIds(ids);
+      bookmarkSelectionDragRef.current = null;
+      setBookmarkSelectionDrag(null);
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [bookmarkSelectionDrag]);
+
   const getDraggedBookmarkId = (e: React.DragEvent): string => {
+    const selectionRaw = e.dataTransfer.getData(BOOKMARK_SELECTION_DRAG_MIME);
+    if (selectionRaw) {
+      try {
+        const parsed = JSON.parse(selectionRaw) as unknown;
+        if (Array.isArray(parsed)) {
+          const first = parsed.map((id) => String(id)).find(Boolean);
+          if (first) return first;
+        }
+      } catch {
+        // Fall through to single-item drag data.
+      }
+    }
     const directId = e.dataTransfer.getData(BOOKMARK_DRAG_MIME);
     const plain = e.dataTransfer.getData("text/plain");
     const fallbackId = plain.startsWith(BOOKMARK_DRAG_FALLBACK_PREFIX)
@@ -1496,13 +1577,120 @@ export default function App() {
     return directId || fallbackId;
   };
 
-  const handleBookmarkDropOnTag = (bookmarkId: string, tag: string) => {
+  const handleBookmarkDropOnTag = (bookmarkIds: string | string[], tag: string) => {
+    const ids = Array.isArray(bookmarkIds) ? bookmarkIds : [bookmarkIds];
+    if (ids.length === 0) return;
+    const sourceTag =
+      selectedTag &&
+      selectedTag !== NOT_TAGGED_FILTER &&
+      selectedTag !== NOT_UNIQUE_FILTER &&
+      selectedTag !== NOT_REACHABLE_FILTER &&
+      selectedTag !== ARCHIVED_FILTER
+        ? selectedTag
+        : null;
+    if (sourceTag === tag) return;
     replaceBookmarks(
       bookmarks.map((b) => {
-        if (b.id !== bookmarkId || b.tags.includes(tag)) return b;
-        return { ...b, tags: [...b.tags, tag] };
+        if (!ids.includes(b.id)) return b;
+        const nextTags = b.tags.filter((t) => t !== ARCHIVED_FILTER && t !== sourceTag);
+        if (!nextTags.includes(tag)) nextTags.push(tag);
+        return { ...b, tags: nextTags };
       })
     );
+    if (selectedBookmarkIds.some((id) => ids.includes(id))) {
+      setSelectedBookmarkIds([]);
+    }
+  };
+
+  const handleArchiveBookmark = (bookmarkId: string, sourceTag: string | null = selectedTag) => {
+    replaceBookmarks(
+      bookmarks.map((b) => {
+        if (b.id !== bookmarkId) return b;
+        const isArchived = b.tags.includes(ARCHIVED_FILTER);
+        const activeSourceTag =
+          sourceTag &&
+          sourceTag !== null &&
+          sourceTag !== ARCHIVED_FILTER &&
+          sourceTag !== NOT_TAGGED_FILTER &&
+          sourceTag !== NOT_UNIQUE_FILTER &&
+          sourceTag !== NOT_REACHABLE_FILTER
+            ? sourceTag
+            : null;
+        const nextTags = isArchived
+          ? b.tags.filter((t) => t !== ARCHIVED_FILTER)
+          : [
+              ...b.tags.filter((t) => t !== ARCHIVED_FILTER && t !== activeSourceTag),
+              ARCHIVED_FILTER,
+            ];
+        return { ...b, tags: Array.from(new Set(nextTags)) };
+      })
+    );
+  };
+
+  const handleMoveBookmarksBetweenTags = (sourceTag: string, count: number) => {
+    if (count === 0) {
+      setDropResult("This tag has no bookmarks");
+      setTimeout(() => setDropResult(null), 3000);
+      return;
+    }
+    setPendingMoveBookmarks(sourceTag);
+    setMoveBookmarksSearch("");
+    setMoveBookmarksNewTag("");
+  };
+
+  const applySearchTagToBookmarks = (targetTag: string) => {
+    if (!pendingSearchTagAssign || pendingSearchTagAssign.length === 0) return;
+    if (!targetTag) return;
+    const targetSet = new Set(pendingSearchTagAssign);
+    replaceBookmarks(
+      bookmarks.map((b) => {
+        if (!targetSet.has(b.id)) return b;
+        if (b.tags.includes(targetTag)) return b;
+        return { ...b, tags: [...b.tags, targetTag] };
+      })
+    );
+    setPendingSearchTagAssign(null);
+    setSearchTagSearch("");
+    setSearchTagNewTag("");
+  };
+
+  const createAndApplySearchTag = () => {
+    const targetTag = normalizeTagName(searchTagNewTag);
+    if (!targetTag) return;
+    addTag(targetTag);
+    applySearchTagToBookmarks(targetTag);
+  };
+
+  const applyMoveBookmarksToTag = (sourceTag: string, targetTag: string) => {
+    if (!targetTag || targetTag === sourceTag || targetTag === ARCHIVED_FILTER) return;
+    replaceBookmarks(
+      bookmarks.map((b) => {
+        if (!b.tags.includes(sourceTag)) return b;
+        const nextTags = b.tags.filter((t) => t !== sourceTag);
+        if (!nextTags.includes(targetTag)) nextTags.push(targetTag);
+        return { ...b, tags: nextTags };
+      })
+    );
+    if (selectedTag === sourceTag) setSelectedTag(targetTag);
+  };
+
+  const confirmMoveBookmarksTarget = (targetTag: string) => {
+    if (!pendingMoveBookmarks) return;
+    applyMoveBookmarksToTag(pendingMoveBookmarks, targetTag);
+    setPendingMoveBookmarks(null);
+    setMoveBookmarksSearch("");
+    setMoveBookmarksNewTag("");
+  };
+
+  const createAndMoveBookmarksTarget = () => {
+    if (!pendingMoveBookmarks) return;
+    const targetTag = normalizeTagName(moveBookmarksNewTag);
+    if (!targetTag || targetTag === pendingMoveBookmarks || targetTag === ARCHIVED_FILTER) return;
+    addTag(targetTag);
+    applyMoveBookmarksToTag(pendingMoveBookmarks, targetTag);
+    setPendingMoveBookmarks(null);
+    setMoveBookmarksSearch("");
+    setMoveBookmarksNewTag("");
   };
 
   const handleReorderBookmark = (draggedId: string, targetId: string) => {
@@ -1567,29 +1755,6 @@ export default function App() {
     setTagOrder(next);
   };
 
-  const archiveSidebarTag = (tag: string) => {
-    setTagOrder((prev) => prev.filter((t) => t !== tag));
-    setArchivedTagOrder((prev) => (prev.includes(tag) ? prev : [...prev, tag]));
-    setShowArchivedTags(true);
-  };
-
-  const restoreSidebarTagToEnd = (tag: string) => {
-    setArchivedTagOrder((prev) => prev.filter((t) => t !== tag));
-    setTagOrder((prev) => (prev.includes(tag) ? prev : [...prev, tag]));
-  };
-
-  const restoreArchivedSidebarTagBefore = (draggedTag: string, targetTag: string) => {
-    if (draggedTag === targetTag) return;
-    setArchivedTagOrder((prev) => prev.filter((t) => t !== draggedTag));
-    setTagOrder((prev) => {
-      const next = prev.filter((t) => t !== draggedTag);
-      const targetIndex = next.indexOf(targetTag);
-      if (targetIndex < 0) return [...next, draggedTag];
-      next.splice(targetIndex, 0, draggedTag);
-      return next;
-    });
-  };
-
   const exitSidebarTagEditMode = () => {
     setSidebarTagEditMode(false);
     setSelectedSidebarTags([]);
@@ -1620,7 +1785,6 @@ export default function App() {
     const tagSet = new Set(tagsToDelete);
     tagsToDelete.forEach((tag) => deleteTag(tag));
     setTagOrder((prev) => prev.filter((tag) => !tagSet.has(tag)));
-    setArchivedTagOrder((prev) => prev.filter((tag) => !tagSet.has(tag)));
     setCleanupBypassTags((prev) => prev.filter((tag) => !tagSet.has(tag)));
     if (selectedTag && tagSet.has(selectedTag)) setSelectedTag(null);
     exitSidebarTagEditMode();
@@ -1631,10 +1795,9 @@ export default function App() {
     const normalized = normalizeTagName(newName);
 
     if (normalized && normalized !== oldName) {
-      const occupiedNames = new Set([...orderedSidebarTags, ...archivedSidebarTags].filter((t) => t !== oldName));
-      const renameOrder = (prev: string[], visual: string[]) => {
+      setTagOrder((prev) => {
         const hasOld = prev.includes(oldName);
-        const hasNew = occupiedNames.has(normalized);
+        const hasNew = prev.includes(normalized);
 
         if (hasOld) {
           if (hasNew) {
@@ -1643,22 +1806,15 @@ export default function App() {
           return prev.map((t) => (t === oldName ? normalized : t));
         }
 
+        // Keep renamed tags in the same visual sidebar position even when
+        // they were not previously pinned in tagOrder.
+        const visual = [...orderedSidebarTags];
         const from = visual.indexOf(oldName);
         if (from < 0) return prev;
-        if (hasNew) return prev;
         const without = visual.filter((t) => t !== oldName && t !== normalized);
         const insertAt = Math.max(0, Math.min(from, without.length));
         without.splice(insertAt, 0, normalized);
         return without;
-      };
-
-      setTagOrder((prev) => {
-        // Keep renamed tags in the same visual sidebar position even when
-        // they were not previously pinned in tagOrder.
-        return renameOrder(prev, orderedSidebarTags);
-      });
-      setArchivedTagOrder((prev) => {
-        return renameOrder(prev, archivedSidebarTags);
       });
     }
 
@@ -1968,7 +2124,6 @@ export default function App() {
         rankOrder,
         zoom,
         tagOrder,
-        archivedTagOrder,
         sidebarOpen,
         appShortcuts,
         appCatalog,
@@ -2033,7 +2188,6 @@ export default function App() {
         }
         if (typeof prefs.zoom === "number") setZoom(prefs.zoom);
         if (Array.isArray(prefs.tagOrder)) setTagOrder(prefs.tagOrder);
-        if (Array.isArray(prefs.archivedTagOrder)) setArchivedTagOrder(prefs.archivedTagOrder);
         if (Array.isArray(prefs.cleanupBypassTags)) setCleanupBypassTags(prefs.cleanupBypassTags);
         if (typeof prefs.sidebarOpen === "boolean") setSidebarOpen(prefs.sidebarOpen);
         if (Array.isArray(prefs.appShortcuts)) {
@@ -2259,15 +2413,15 @@ export default function App() {
                 + New
               </SidebarNewButton>
             </div>
-            <div
-              style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-start", gap: 10, padding: "0 10px 12px 14px" }}
-              onDragOver={(e) => {
-                const hasAppData = e.dataTransfer.types.includes(APP_SHORTCUT_DRAG_MIME);
-                const hasBookmarkData = e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME);
-                if (!hasAppData && !hasBookmarkData) return;
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-              }}
+              <div
+                style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-start", gap: 10, padding: "0 10px 12px 14px" }}
+                onDragOver={(e) => {
+                  const hasAppData = e.dataTransfer.types.includes(APP_SHORTCUT_DRAG_MIME);
+                  const hasBookmarkData = e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME) || e.dataTransfer.types.includes(BOOKMARK_SELECTION_DRAG_MIME);
+                  if (!hasAppData && !hasBookmarkData) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                }}
               onDrop={(e) => {
                 const draggedBookmarkId = getDraggedBookmarkId(e);
                 if (draggedBookmarkId) {
@@ -2283,7 +2437,7 @@ export default function App() {
                     style={{ position: "relative", width: 24, height: 24 }}
                     onDragOver={(e) => {
                       const hasAppData = e.dataTransfer.types.includes(APP_SHORTCUT_DRAG_MIME);
-                      const hasBookmarkData = e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME);
+                      const hasBookmarkData = e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME) || e.dataTransfer.types.includes(BOOKMARK_SELECTION_DRAG_MIME);
                       if (!hasAppData && !hasBookmarkData) return;
                       e.preventDefault();
                       e.dataTransfer.dropEffect = "move";
@@ -2521,7 +2675,13 @@ export default function App() {
                 />
               </div>
             )}
-            <TagChip label={t("all")} count={bookmarks.length} active={selectedTag === null} onClick={() => setSelectedTag(null)} vertical />
+            <TagChip
+              label={t("all")}
+              count={bookmarks.filter((b) => !b.tags.includes(ARCHIVED_FILTER)).length}
+              active={selectedTag === null}
+              onClick={() => setSelectedTag(null)}
+              vertical
+            />
             <TagChip
               label={t("notTagged")}
               count={bookmarks.filter((b) => visibleTags(b.tags).length === 0).length}
@@ -2544,6 +2704,13 @@ export default function App() {
               active={selectedTag === NOT_REACHABLE_FILTER}
               onClick={() => setSelectedTag(selectedTag === NOT_REACHABLE_FILTER ? null : NOT_REACHABLE_FILTER)}
               onClear={handleClearNotReachable}
+              vertical
+            />
+            <TagChip
+              label="Archived"
+              count={bookmarks.filter((b) => b.tags.includes(ARCHIVED_FILTER)).length}
+              active={selectedTag === ARCHIVED_FILTER}
+              onClick={() => setSelectedTag(selectedTag === ARCHIVED_FILTER ? null : ARCHIVED_FILTER)}
               vertical
             />
             <div style={{ margin: "8px 8px 8px 16px", display: "flex", alignItems: "center", gap: 6, width: "calc(100% - 24px)" }}>
@@ -2606,15 +2773,13 @@ export default function App() {
                   active={selectedTag === tag}
                   editMode={sidebarTagEditMode}
                   selected={selectedSidebarTags.includes(tag)}
-                  archived={false}
                   theme={theme}
                   onSelect={() => setSelectedTag(selectedTag === tag ? null : tag)}
                   onToggleSelect={() => toggleSelectedSidebarTag(tag)}
                   onRename={(newName) => handleRenameSidebarTag(tag, newName)}
                   onDelete={() => setPendingTagDelete(tag)}
                   onDeleteBookmarks={() => handleDeleteBookmarksOnTag(tag, count)}
-                  onArchive={() => archiveSidebarTag(tag)}
-                  onRestore={() => restoreSidebarTagToEnd(tag)}
+                  onMoveBookmarks={() => handleMoveBookmarksBetweenTags(tag, count)}
                   cleanupBypassed={cleanupBypassTags.includes(tag)}
                   onToggleCleanupBypass={() => {
                     setCleanupBypassTags((prev) =>
@@ -2627,87 +2792,14 @@ export default function App() {
                     cycleTagColor(tag);
                     setTagColorVersion((v) => v + 1);
                   }}
-                  onBookmarkDrop={(bookmarkId) => handleBookmarkDropOnTag(bookmarkId, tag)}
+                  onBookmarkDrop={(bookmarkIds) => handleBookmarkDropOnTag(bookmarkIds, tag)}
                   onTagReorder={handleReorderSidebarTag}
-                  onRestoreArchivedTag={restoreArchivedSidebarTagBefore}
                   activeContextMenu={sidebarTagContextMenu?.tag === tag ? sidebarTagContextMenu : null}
-                  onOpenContextMenu={(x, y, openUp) => setSidebarTagContextMenu({ tag, x, y, openUp, archived: false })}
+                  onOpenContextMenu={(x, y, openUp) => setSidebarTagContextMenu({ tag, x, y, openUp })}
                   onCloseContextMenu={() => setSidebarTagContextMenu(null)}
                 />
               );
             })}
-            {archivedSidebarTags.length > 0 && (
-              <>
-                <div style={{ margin: "10px 8px 4px 16px", display: "flex", alignItems: "center" }}>
-                  <button
-                    onClick={() => setShowArchivedTags((prev) => !prev)}
-                    style={{
-                      width: "100%",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      border: "none",
-                      background: "none",
-                      padding: "4px 0",
-                      cursor: "pointer",
-                      color: "var(--text-3)",
-                      fontSize: 11,
-                      fontWeight: 800,
-                      letterSpacing: "0.08em",
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    <span>Archived Tags</span>
-                    <span style={{ marginLeft: "auto", color: "var(--text-4)", fontSize: 11, fontWeight: 700 }}>
-                      {archivedSidebarTags.length}
-                    </span>
-                    <span style={{ transform: showArchivedTags ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.12s" }}>
-                      ▾
-                    </span>
-                  </button>
-                </div>
-                {showArchivedTags && archivedSidebarTags.map((tag) => {
-                  const count = bookmarks.filter((b) => b.tags.includes(tag)).length;
-                  return (
-                    <SidebarTagRow
-                      key={tag}
-                      tag={tag}
-                      count={count}
-                      active={selectedTag === tag}
-                      editMode={sidebarTagEditMode}
-                      selected={selectedSidebarTags.includes(tag)}
-                      archived
-                      theme={theme}
-                      onSelect={() => setSelectedTag(selectedTag === tag ? null : tag)}
-                      onToggleSelect={() => toggleSelectedSidebarTag(tag)}
-                      onRename={(newName) => handleRenameSidebarTag(tag, newName)}
-                      onDelete={() => setPendingTagDelete(tag)}
-                      onDeleteBookmarks={() => handleDeleteBookmarksOnTag(tag, count)}
-                      onArchive={() => archiveSidebarTag(tag)}
-                      onRestore={() => restoreSidebarTagToEnd(tag)}
-                      cleanupBypassed={cleanupBypassTags.includes(tag)}
-                      onToggleCleanupBypass={() => {
-                        setCleanupBypassTags((prev) =>
-                          prev.includes(tag)
-                            ? prev.filter((t) => t !== tag)
-                            : [...prev, tag]
-                        );
-                      }}
-                      onChangeColor={() => {
-                        cycleTagColor(tag);
-                        setTagColorVersion((v) => v + 1);
-                      }}
-                      onBookmarkDrop={(bookmarkId) => handleBookmarkDropOnTag(bookmarkId, tag)}
-                      onTagReorder={handleReorderSidebarTag}
-                      onRestoreArchivedTag={restoreArchivedSidebarTagBefore}
-                      activeContextMenu={sidebarTagContextMenu?.tag === tag ? sidebarTagContextMenu : null}
-                      onOpenContextMenu={(x, y, openUp) => setSidebarTagContextMenu({ tag, x, y, openUp, archived: true })}
-                      onCloseContextMenu={() => setSidebarTagContextMenu(null)}
-                    />
-                  );
-                })}
-              </>
-            )}
           </div>
         </aside>
 
@@ -2932,51 +3024,88 @@ export default function App() {
 
             <div style={{ flex: 1 }} />
 
-            <div style={{ position: "relative", width: 220, flexShrink: 0 }}>
-              <input
-                type="text"
-                placeholder={t("searchPlaceholder")}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                style={{
-                  background: "var(--card)",
-                  border: "1px solid var(--border-hover)",
-                  borderRadius: 7,
-                  padding: "6px 30px 6px 12px",
-                  color: "var(--text)",
-                  fontSize: 13,
-                  outline: "none",
-                  width: "100%",
-                }}
-              />
-              {search && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, width: 260, flexShrink: 0 }}>
+              <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
+                <input
+                  type="text"
+                  placeholder={t("searchPlaceholder")}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  style={{
+                    background: "var(--card)",
+                    border: "1px solid var(--border-hover)",
+                    borderRadius: 7,
+                    padding: "6px 30px 6px 12px",
+                    color: "var(--text)",
+                    fontSize: 13,
+                    outline: "none",
+                    width: "100%",
+                  }}
+                />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch("")}
+                    aria-label="Clear search"
+                    title="Clear search"
+                    style={{
+                      position: "absolute",
+                      top: "50%",
+                      right: 8,
+                      transform: "translateY(-50%)",
+                      width: 18,
+                      height: 18,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      border: "none",
+                      borderRadius: 9999,
+                      background: "transparent",
+                      color: "var(--text-3)",
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <path d="M2 2L10 10" />
+                      <path d="M10 2L2 10" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              {search.trim() && (
                 <button
                   type="button"
-                  onClick={() => setSearch("")}
-                  aria-label="Clear search"
-                  title="Clear search"
+                  onClick={() => {
+                    setPendingSearchTagAssign(sorted.map((b) => b.id));
+                    setSearchTagSearch("");
+                    setSearchTagNewTag("");
+                  }}
+                  aria-label="Tag search results"
+                  title="Tag search results"
                   style={{
-                    position: "absolute",
-                    top: "50%",
-                    right: 8,
-                    transform: "translateY(-50%)",
-                    width: 18,
-                    height: 18,
+                    width: 28,
+                    height: 28,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    border: "none",
+                    border: "1px solid var(--border-hover)",
                     borderRadius: 9999,
-                    background: "transparent",
-                    color: "var(--text-3)",
+                    background: "var(--bg)",
+                    color: "var(--text-2)",
                     cursor: "pointer",
                     padding: 0,
+                    flexShrink: 0,
                   }}
                 >
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                    <path d="M2 2L10 10" />
-                    <path d="M10 2L2 10" />
-                  </svg>
+                  <img
+                    src="/tag.svg"
+                    alt=""
+                    aria-hidden="true"
+                    width={14}
+                    height={14}
+                    style={{ display: "block" }}
+                  />
                 </button>
               )}
             </div>
@@ -3158,7 +3287,11 @@ export default function App() {
 
 
           {/* Content */}
-          <main style={{ flex: 1, overflowY: "auto", padding: effectiveGroupByDate ? "0 16px 16px 16px" : "16px 16px 16px 16px" }}>
+          <main
+            ref={mainContentRef}
+            onMouseDown={handleBookmarkSelectionStart}
+            style={{ flex: 1, overflowY: "auto", padding: effectiveGroupByDate ? "0 16px 16px 16px" : "16px 16px 16px 16px", position: "relative" }}
+          >
             {sorted.length === 0 ? (
               <Empty onAdd={() => openAddBookmarkModal(effectiveSelectedTag)} />
             ) : displayMode === "list" ? (
@@ -3183,11 +3316,13 @@ export default function App() {
                   onTagClick={setSelectedTag}
                   onEdit={(b) => setModal({ mode: "edit", bookmark: b })}
                   onDelete={handleDelete}
+                  onArchive={handleArchiveBookmark}
                   onDragStartBookmark={handleBookmarkDragStart}
                   onDropBookmarkOnBookmark={handleReorderBookmark}
                   showPreview={displayMode === "preview"}
                   groupByDate={effectiveGroupByDate}
                   deleteConfirmId={deleteConfirm}
+                  selectedBookmarkIds={selectedBookmarkIds}
                 />
               ) : (
                 <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: 10 }}>
@@ -3200,14 +3335,32 @@ export default function App() {
                         onTagClick={setSelectedTag}
                         onEdit={() => setModal({ mode: "edit", bookmark: b })}
                         onDelete={() => handleDelete(b.id)}
+                        onArchive={() => handleArchiveBookmark(b.id)}
                         onDragStartBookmark={handleBookmarkDragStart}
                         onDropBookmarkOnBookmark={handleReorderBookmark}
                         showPreview={displayMode === "preview"}
                         deleteConfirming={deleteConfirm === b.id}
+                        archived={b.tags.includes(ARCHIVED_FILTER)}
+                        selected={selectedBookmarkIds.includes(b.id)}
                       />
                     ))}
                 </div>
               )
+            )}
+            {bookmarkSelectionDrag && (
+              <div
+                style={{
+                  position: "fixed",
+                  left: Math.min(bookmarkSelectionDrag.startX, bookmarkSelectionDrag.currentX),
+                  top: Math.min(bookmarkSelectionDrag.startY, bookmarkSelectionDrag.currentY),
+                  width: Math.abs(bookmarkSelectionDrag.currentX - bookmarkSelectionDrag.startX),
+                  height: Math.abs(bookmarkSelectionDrag.currentY - bookmarkSelectionDrag.startY),
+                  border: "1px solid rgba(59,130,246,0.9)",
+                  background: "rgba(59,130,246,0.15)",
+                  pointerEvents: "none",
+                  zIndex: 80,
+                }}
+              />
             )}
           </main>
 
@@ -3382,7 +3535,6 @@ export default function App() {
                 rankOrder,
                 zoom,
                 tagOrder,
-                archivedTagOrder,
                 sidebarOpen,
                 appShortcuts,
                 appCatalog,
@@ -3411,7 +3563,6 @@ export default function App() {
                 rankOrder,
                 zoom,
                 tagOrder,
-                archivedTagOrder,
                 sidebarOpen,
                 appShortcuts,
                 appCatalog,
@@ -3842,8 +3993,6 @@ export default function App() {
                   onClick={() => {
                     deleteTag(pendingTagDelete);
                     setCleanupBypassTags((prev) => prev.filter((t) => t !== pendingTagDelete));
-                    setTagOrder((prev) => prev.filter((t) => t !== pendingTagDelete));
-                    setArchivedTagOrder((prev) => prev.filter((t) => t !== pendingTagDelete));
                     if (selectedTag === pendingTagDelete) setSelectedTag(null);
                     setPendingTagDelete(null);
                   }}
@@ -3855,6 +4004,358 @@ export default function App() {
                 >
                   Delete tag
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {pendingMoveBookmarks && (
+          <div
+            onClick={() => {
+              setPendingMoveBookmarks(null);
+              setMoveBookmarksSearch("");
+              setMoveBookmarksNewTag("");
+            }}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.65)",
+              backdropFilter: "blur(4px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1000,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "var(--card)",
+                border: "1px solid var(--border-hover)",
+                borderRadius: 14,
+                padding: 24,
+                width: 420,
+                maxWidth: "calc(100vw - 32px)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+                boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)", lineHeight: 1.3 }}>
+                  Move bookmarks from "{pendingMoveBookmarks}"
+                </h2>
+                <button
+                  onClick={() => {
+                    setPendingMoveBookmarks(null);
+                    setMoveBookmarksSearch("");
+                    setMoveBookmarksNewTag("");
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "var(--text-3)",
+                    fontSize: 18,
+                    cursor: "pointer",
+                    lineHeight: 1,
+                    padding: 2,
+                    flexShrink: 0,
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+              <p style={{ margin: 0, fontSize: 13, color: "var(--text-2)", lineHeight: 1.5 }}>
+                Choose an existing tag or create a new one for the selected bookmarks.
+              </p>
+
+              <input
+                type="text"
+                value={moveBookmarksSearch}
+                onChange={(e) => setMoveBookmarksSearch(e.target.value)}
+                placeholder="Search tags"
+                style={{
+                  width: "100%",
+                  background: "var(--bg)",
+                  border: "1px solid var(--border-hover)",
+                  borderRadius: 8,
+                  padding: "8px 12px",
+                  color: "var(--text)",
+                  fontSize: 13,
+                  outline: "none",
+                }}
+              />
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                }}
+              >
+                <input
+                  type="text"
+                  value={moveBookmarksNewTag}
+                  onChange={(e) => setMoveBookmarksNewTag(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") createAndMoveBookmarksTarget();
+                  }}
+                  placeholder="Create new tag"
+                  style={{
+                    flex: 1,
+                    background: "var(--bg)",
+                    border: "1px solid var(--border-hover)",
+                    borderRadius: 8,
+                    padding: "8px 12px",
+                    color: "var(--text)",
+                    fontSize: 13,
+                    outline: "none",
+                  }}
+                />
+                <button
+                  onClick={createAndMoveBookmarksTarget}
+                  style={{
+                    background: "#3b82f6",
+                    border: "none",
+                    borderRadius: 8,
+                    padding: "8px 12px",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Create & Move
+                </button>
+              </div>
+
+              <div
+                style={{
+                  maxHeight: 260,
+                  overflowY: "auto",
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 8,
+                  paddingRight: 2,
+                }}
+              >
+                {allTags
+                  .filter((tag) => tag !== pendingMoveBookmarks && tag.toLowerCase().includes(moveBookmarksSearch.trim().toLowerCase()))
+                  .map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => confirmMoveBookmarksTarget(tag)}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        width: "auto",
+                        background: "var(--bg)",
+                        border: "1px solid var(--border-hover)",
+                        borderRadius: 9999,
+                        padding: "7px 12px",
+                        color: "var(--text)",
+                        fontSize: 13,
+                        cursor: "pointer",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                        <span
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: "50%",
+                            background: tagColor(tag),
+                            flexShrink: 0,
+                          }}
+                        />
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tag}</span>
+                      </span>
+                    </button>
+                  ))}
+                {allTags.filter((tag) => tag !== pendingMoveBookmarks && tag.toLowerCase().includes(moveBookmarksSearch.trim().toLowerCase())).length === 0 && (
+                  <div style={{ fontSize: 13, color: "var(--text-3)", padding: "8px 4px" }}>
+                    No tags match your search.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {pendingSearchTagAssign && (
+          <div
+            onClick={() => {
+              setPendingSearchTagAssign(null);
+              setSearchTagSearch("");
+              setSearchTagNewTag("");
+            }}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.65)",
+              backdropFilter: "blur(4px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1100,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "var(--card)",
+                border: "1px solid var(--border-hover)",
+                borderRadius: 14,
+                padding: 24,
+                width: 420,
+                maxWidth: "calc(100vw - 32px)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+                boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)", lineHeight: 1.3 }}>
+                  Tag search results
+                </h2>
+                <button
+                  onClick={() => {
+                    setPendingSearchTagAssign(null);
+                    setSearchTagSearch("");
+                    setSearchTagNewTag("");
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "var(--text-3)",
+                    fontSize: 18,
+                    cursor: "pointer",
+                    lineHeight: 1,
+                    padding: 2,
+                    flexShrink: 0,
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+              <p style={{ margin: 0, fontSize: 13, color: "var(--text-2)", lineHeight: 1.5 }}>
+                Assign {pendingSearchTagAssign.length.toLocaleString()} search result{pendingSearchTagAssign.length === 1 ? "" : "s"} to a tag.
+              </p>
+
+              <input
+                type="text"
+                value={searchTagSearch}
+                onChange={(e) => setSearchTagSearch(e.target.value)}
+                placeholder="Search tags"
+                style={{
+                  width: "100%",
+                  background: "var(--bg)",
+                  border: "1px solid var(--border-hover)",
+                  borderRadius: 8,
+                  padding: "8px 12px",
+                  color: "var(--text)",
+                  fontSize: 13,
+                  outline: "none",
+                }}
+              />
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                }}
+              >
+                <input
+                  type="text"
+                  value={searchTagNewTag}
+                  onChange={(e) => setSearchTagNewTag(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") createAndApplySearchTag();
+                  }}
+                  placeholder="Create new tag"
+                  style={{
+                    flex: 1,
+                    background: "var(--bg)",
+                    border: "1px solid var(--border-hover)",
+                    borderRadius: 8,
+                    padding: "8px 12px",
+                    color: "var(--text)",
+                    fontSize: 13,
+                    outline: "none",
+                  }}
+                />
+                <button
+                  onClick={createAndApplySearchTag}
+                  style={{
+                    background: "#3b82f6",
+                    border: "none",
+                    borderRadius: 8,
+                    padding: "8px 12px",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Create & Tag
+                </button>
+              </div>
+
+              <div
+                style={{
+                  maxHeight: 260,
+                  overflowY: "auto",
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 8,
+                  paddingRight: 2,
+                }}
+              >
+                {allTags
+                  .filter((tag) => tag.toLowerCase().includes(searchTagSearch.trim().toLowerCase()))
+                  .map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => applySearchTagToBookmarks(tag)}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        width: "auto",
+                        background: "var(--bg)",
+                        border: "1px solid var(--border-hover)",
+                        borderRadius: 9999,
+                        padding: "7px 12px",
+                        color: "var(--text)",
+                        fontSize: 13,
+                        cursor: "pointer",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                        <span
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: "50%",
+                            background: tagColor(tag),
+                            flexShrink: 0,
+                          }}
+                        />
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tag}</span>
+                      </span>
+                    </button>
+                  ))}
+                {allTags.filter((tag) => tag.toLowerCase().includes(searchTagSearch.trim().toLowerCase())).length === 0 && (
+                  <div style={{ fontSize: 13, color: "var(--text-3)", padding: "8px 4px" }}>
+                    No tags match your search.
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -4443,23 +4944,21 @@ function IconExpandTabs() {
   );
 }
 
-function SidebarTagRow({ tag, count, active, editMode, selected, archived, theme, onSelect, onToggleSelect, onRename, onDelete, onDeleteBookmarks, onArchive, onRestore, cleanupBypassed, onToggleCleanupBypass, onChangeColor, onBookmarkDrop, onTagReorder, onRestoreArchivedTag, activeContextMenu, onOpenContextMenu, onCloseContextMenu }: {
-  tag: string; count: number; active: boolean; editMode: boolean; selected: boolean; archived: boolean;
+function SidebarTagRow({ tag, count, active, editMode, selected, theme, onSelect, onToggleSelect, onRename, onDelete, onDeleteBookmarks, onMoveBookmarks, cleanupBypassed, onToggleCleanupBypass, onChangeColor, onBookmarkDrop, onTagReorder, activeContextMenu, onOpenContextMenu, onCloseContextMenu }: {
+  tag: string; count: number; active: boolean; editMode: boolean; selected: boolean;
   theme: ThemeId;
   onSelect: () => void;
   onToggleSelect: () => void;
   onRename: (newName: string) => void;
   onDelete: () => void;
   onDeleteBookmarks: () => void;
-  onArchive: () => void;
-  onRestore: () => void;
+  onMoveBookmarks: () => void;
   cleanupBypassed: boolean;
   onToggleCleanupBypass: () => void;
   onChangeColor: () => void;
-  onBookmarkDrop: (bookmarkId: string) => void;
+  onBookmarkDrop: (bookmarkIds: string[]) => void;
   onTagReorder: (draggedTag: string, targetTag: string) => void;
-  onRestoreArchivedTag: (draggedTag: string, targetTag: string) => void;
-  activeContextMenu: { tag: string; x: number; y: number; openUp: boolean; archived: boolean } | null;
+  activeContextMenu: { tag: string; x: number; y: number; openUp: boolean } | null;
   onOpenContextMenu: (x: number, y: number, openUp: boolean) => void;
   onCloseContextMenu: () => void;
 }) {
@@ -4545,16 +5044,11 @@ function SidebarTagRow({ tag, count, active, editMode, selected, archived, theme
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData(TAG_DRAG_MIME, tag);
-        e.dataTransfer.setData(TAG_SECTION_DRAG_MIME, archived ? "archived" : "active");
       }}
       onDragOver={(e) => {
-        const hasBookmarkData = e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME);
+        const hasBookmarkData = e.dataTransfer.types.includes(BOOKMARK_DRAG_MIME) || e.dataTransfer.types.includes(BOOKMARK_SELECTION_DRAG_MIME);
         const hasTagData = e.dataTransfer.types.includes(TAG_DRAG_MIME);
-        if (archived) {
-          if (!hasBookmarkData) return;
-        } else if (!hasBookmarkData && !hasTagData) {
-          return;
-        }
+        if (!hasBookmarkData && !hasTagData) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
         setDragOver(true);
@@ -4565,25 +5059,32 @@ function SidebarTagRow({ tag, count, active, editMode, selected, archived, theme
         setDragOver(false);
         const draggedTag = e.dataTransfer.getData(TAG_DRAG_MIME);
         if (draggedTag) {
-          const sourceSection = e.dataTransfer.getData(TAG_SECTION_DRAG_MIME) === "archived" ? "archived" : "active";
-          if (sourceSection === "archived" && !archived) {
-            onRestoreArchivedTag(draggedTag, tag);
-            return;
-          }
-          if (sourceSection === "active" && !archived) {
-            onTagReorder(draggedTag, tag);
-            return;
-          }
+          onTagReorder(draggedTag, tag);
           return;
         }
         const directId = e.dataTransfer.getData(BOOKMARK_DRAG_MIME);
+        const selectionRaw = e.dataTransfer.getData(BOOKMARK_SELECTION_DRAG_MIME);
+        if (selectionRaw) {
+          try {
+            const parsed = JSON.parse(selectionRaw) as unknown;
+            if (Array.isArray(parsed)) {
+              const ids = parsed.map((id) => String(id)).filter(Boolean);
+              if (ids.length > 0) {
+                onBookmarkDrop(ids);
+                return;
+              }
+            }
+          } catch {
+            // Fallback to single bookmark payload.
+          }
+        }
         const plain = e.dataTransfer.getData("text/plain");
         const fallbackId = plain.startsWith(BOOKMARK_DRAG_FALLBACK_PREFIX)
           ? plain.slice(BOOKMARK_DRAG_FALLBACK_PREFIX.length)
           : "";
         const bookmarkId = directId || fallbackId;
         if (!bookmarkId) return;
-        onBookmarkDrop(bookmarkId);
+        onBookmarkDrop([bookmarkId]);
       }}
       style={{
         display: "flex", alignItems: "center",
@@ -4661,57 +5162,40 @@ function SidebarTagRow({ tag, count, active, editMode, selected, archived, theme
             zIndex: 3000,
           }}
         >
-          {!archived && (
-            <TagContextMenuItem
-              onClick={() => {
-                onChangeColor();
-                onCloseContextMenu();
-              }}
-            >
-              Change Color
-            </TagContextMenuItem>
-          )}
-          {!archived && (
-            <TagContextMenuItem
-              onClick={() => {
-                setEditing(true);
-                onCloseContextMenu();
-              }}
-            >
-              Rename Tag
-            </TagContextMenuItem>
-          )}
-          {!archived && (
-            <TagContextMenuItem
-              onClick={() => {
-                onToggleCleanupBypass();
-                onCloseContextMenu();
-              }}
-              checked={cleanupBypassed}
-              layout="space-between"
-            >
-              Bypass Clean Up
-            </TagContextMenuItem>
-          )}
-          {!archived ? (
-            <TagContextMenuItem
-              onClick={() => {
-                onArchive();
-                onCloseContextMenu();
-              }}
-            >
-              Archive Tag
-            </TagContextMenuItem>
-          ) : (
-            <TagContextMenuItem
-              onClick={() => {
-                onRestore();
-                onCloseContextMenu();
-              }}
-            >
-              Restore Tag
-            </TagContextMenuItem>
-          )}
+          <TagContextMenuItem
+            onClick={() => {
+              onChangeColor();
+              onCloseContextMenu();
+            }}
+          >
+            Change Color
+          </TagContextMenuItem>
+          <TagContextMenuItem
+            onClick={() => {
+              setEditing(true);
+              onCloseContextMenu();
+            }}
+          >
+            Rename Tag
+          </TagContextMenuItem>
+          <TagContextMenuItem
+            onClick={() => {
+              onToggleCleanupBypass();
+              onCloseContextMenu();
+            }}
+            checked={cleanupBypassed}
+            layout="space-between"
+          >
+            Bypass Clean Up
+          </TagContextMenuItem>
+          <TagContextMenuItem
+            onClick={() => {
+              onMoveBookmarks();
+              onCloseContextMenu();
+            }}
+          >
+            Move Bookmarks
+          </TagContextMenuItem>
           <TagContextMenuItem
             onClick={() => {
               onDelete();

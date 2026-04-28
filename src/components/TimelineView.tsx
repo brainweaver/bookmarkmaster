@@ -1,6 +1,7 @@
 import type { Bookmark } from "../data/mockBookmarks";
 import BookmarkCard from "./BookmarkCard";
 import { DateHeader } from "./ListView";
+import { SYSTEM_TAG_ARCHIVED } from "../constants/tags";
 
 function gridColumnsFromZoom(zoom: number): number {
   const normalized = (Math.max(1, Math.min(5, zoom)) - 1) / 4;
@@ -13,15 +14,17 @@ interface Props {
   onTagClick: (tag: string) => void;
   onEdit: (b: Bookmark) => void;
   onDelete: (id: string) => void;
+  onArchive: (id: string) => void;
   onDragStartBookmark: (bookmarkId: string, e: React.DragEvent) => void;
   onDropBookmarkOnBookmark?: (draggedId: string, targetId: string) => void;
   showPreview: boolean;
   groupByDate: boolean;
   deleteConfirmId: string | null;
+  selectedBookmarkIds: string[];
 }
 
 export default function TimelineView({
-  bookmarks, zoom, onTagClick, onEdit, onDelete, onDragStartBookmark, onDropBookmarkOnBookmark, showPreview, groupByDate, deleteConfirmId,
+  bookmarks, zoom, onTagClick, onEdit, onDelete, onArchive, onDragStartBookmark, onDropBookmarkOnBookmark, showPreview, groupByDate, deleteConfirmId, selectedBookmarkIds,
 }: Props) {
   const columns = gridColumnsFromZoom(zoom);
   if (bookmarks.length === 0) return null;
@@ -36,10 +39,13 @@ export default function TimelineView({
           onTagClick={onTagClick}
           onEdit={() => onEdit(b)}
           onDelete={() => onDelete(b.id)}
+          onArchive={() => onArchive(b.id)}
           onDragStartBookmark={onDragStartBookmark}
           onDropBookmarkOnBookmark={onDropBookmarkOnBookmark}
           showPreview={showPreview}
           deleteConfirming={deleteConfirmId === b.id}
+          archived={b.tags.includes(SYSTEM_TAG_ARCHIVED)}
+          selected={selectedBookmarkIds.includes(b.id)}
         />
       ))}
     </div>

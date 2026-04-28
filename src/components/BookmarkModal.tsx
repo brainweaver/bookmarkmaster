@@ -12,12 +12,13 @@ interface Props {
 }
 
 export default function BookmarkModal({ initial, prefill, existingTags, onSave, onClose }: Props) {
-  const systemTags = initial?.tags.filter(isSystemTag) ?? [];
+  const systemTags = initial?.tags.filter(isSystemTag) ?? prefill?.tags?.filter(isSystemTag) ?? [];
+  const initialTags = initial?.tags ?? prefill?.tags ?? [];
   const [title, setTitle] = useState(initial?.title ?? prefill?.title ?? "");
   const [url, setUrl] = useState(initial?.url ?? prefill?.url ?? "");
   const [favicon, setFavicon] = useState(initial?.favicon ?? prefill?.favicon ?? "");
   const [description, setDescription] = useState(initial?.description ?? prefill?.description ?? "");
-  const [tags, setTags] = useState<string[]>(visibleTags(initial?.tags ?? prefill?.tags ?? []));
+  const [tags, setTags] = useState<string[]>(visibleTags(initialTags));
   const [tagInput, setTagInput] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});

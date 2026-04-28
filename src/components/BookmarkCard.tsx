@@ -10,10 +10,13 @@ interface Props {
   onTagClick: (tag: string) => void;
   onEdit: () => void;
   onDelete: () => void;
+  onArchive: () => void;
   onDragStartBookmark: (bookmarkId: string, e: React.DragEvent) => void;
   onDropBookmarkOnBookmark?: (draggedId: string, targetId: string) => void;
   showPreview?: boolean;
   deleteConfirming?: boolean;
+  archived?: boolean;
+  selected?: boolean;
 }
 
 export default function BookmarkCard({
@@ -22,10 +25,13 @@ export default function BookmarkCard({
   onTagClick,
   onEdit,
   onDelete,
+  onArchive,
   onDragStartBookmark,
   onDropBookmarkOnBookmark,
   showPreview = false,
   deleteConfirming = false,
+  archived = false,
+  selected = false,
 }: Props) {
   const [faviconError, setFaviconError] = useState(false);
   const [previewError, setPreviewError] = useState(false);
@@ -65,6 +71,7 @@ export default function BookmarkCard({
 
   return (
     <div
+      data-bookmark-id={bookmark.id}
       style={{ position: "relative", width: "100%", minWidth: 0 }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -98,12 +105,12 @@ export default function BookmarkCard({
           minWidth: 0,
           background: "var(--card)",
           borderRadius: 10,
-          border: `1px solid ${dragOver ? "#3b82f6" : hovered ? "var(--border-hover)" : "var(--border)"}`,
+          border: `1px solid ${selected ? "#3b82f6" : dragOver ? "#3b82f6" : hovered ? "var(--border-hover)" : "var(--border)"}`,
           textDecoration: "none",
           color: "inherit",
           overflow: "hidden",
           transition: "border-color 0.15s, box-shadow 0.15s",
-          boxShadow: hovered ? "var(--bookmark-card-shadow)" : "none",
+          boxShadow: selected ? "0 0 0 1px rgba(59,130,246,0.25)" : hovered ? "var(--bookmark-card-shadow)" : "none",
           cursor: "pointer",
           height: showPreview ? previewCardHeight : gridCardHeight,
         }}
@@ -314,6 +321,24 @@ export default function BookmarkCard({
               <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M11.5 1.5a2.121 2.121 0 0 1 3 3L5 14H2v-3L11.5 1.5z" />
               </svg>
+            }
+          />
+          <ActionBtn
+            title={archived ? "Restore" : "Archive"}
+            onClick={(e) => {
+              e.preventDefault();
+              onArchive();
+            }}
+            icon={
+              archived ? (
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M5.5 2.5a.75.75 0 0 1 0 1.5h4.19L8.72 2.8a.75.75 0 1 1 1.06-1.06l2.1 2.1a.75.75 0 0 1 0 1.06l-2.1 2.1a.75.75 0 1 1-1.06-1.06L9.69 5.5H5.5A2.5 2.5 0 0 0 3 8a.75.75 0 0 1-1.5 0 4 4 0 0 1 4-4zm4.5 11a.75.75 0 0 1 0-1.5h4.19l-1.13-1.13a.75.75 0 0 1 1.06-1.06l2.1 2.1a.75.75 0 0 1 0 1.06l-2.1 2.1a.75.75 0 0 1-1.06-1.06L14.19 12H10a2.5 2.5 0 0 0-2.5 2.5.75.75 0 0 1-1.5 0 4 4 0 0 1 4-4z" />
+                </svg>
+              ) : (
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M2 4.25A1.75 1.75 0 0 1 3.75 2.5h2.19c.46 0 .9.18 1.23.51l.51.49H12.25A1.75 1.75 0 0 1 14 5.25v6.5c0 .97-.78 1.75-1.75 1.75h-8.5A1.75 1.75 0 0 1 2 11.75v-7.5zm1.5 0v7.5c0 .14.11.25.25.25h8.5c.14 0 .25-.11.25-.25v-6.5a.25.25 0 0 0-.25-.25H7.09a1.75 1.75 0 0 1-1.24-.51l-.51-.49H3.75a.25.25 0 0 0-.25.25z" />
+                </svg>
+              )
             }
           />
           <ActionBtn
