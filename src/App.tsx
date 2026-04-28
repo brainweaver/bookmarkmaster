@@ -1649,19 +1649,10 @@ export default function App() {
   const handleBookmarkDropOnTag = (bookmarkIds: string | string[], tag: string) => {
     const ids = Array.isArray(bookmarkIds) ? bookmarkIds : [bookmarkIds];
     if (ids.length === 0) return;
-    const sourceTag =
-      selectedTag &&
-      selectedTag !== NOT_TAGGED_FILTER &&
-      selectedTag !== NOT_UNIQUE_FILTER &&
-      selectedTag !== NOT_REACHABLE_FILTER &&
-      selectedTag !== ARCHIVED_FILTER
-        ? selectedTag
-        : null;
-    if (sourceTag === tag) return;
     replaceBookmarks(
       bookmarks.map((b) => {
         if (!ids.includes(b.id)) return b;
-        const nextTags = b.tags.filter((t) => t !== ARCHIVED_FILTER && t !== sourceTag);
+        const nextTags = [...b.tags];
         if (!nextTags.includes(tag)) nextTags.push(tag);
         return { ...b, tags: nextTags };
       })
