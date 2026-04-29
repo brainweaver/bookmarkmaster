@@ -274,11 +274,11 @@ function ListRow({ bookmark, zoom, colWidths, onTagClick, onEdit, onDelete, onDr
       </span>
 
       {/* Hover actions */}
-      {hovered && (
+      {(hovered || deleteConfirming) && (
         <div style={{ display: "flex", gap: 4, flexShrink: 0, width: 52, justifyContent: "flex-end" }}>
           <RowActionBtn title="Edit" onClick={onEdit} icon="✎" />
           <RowActionBtn
-            title={deleteConfirming ? "Confirm delete" : "Delete"}
+            title={deleteConfirming ? "Delete bookmark" : "Delete"}
             onClick={onDelete} icon="⌫" danger confirming={deleteConfirming}
           />
         </div>

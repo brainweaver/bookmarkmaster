@@ -3,6 +3,23 @@ import type { Bookmark } from "../data/mockBookmarks";
 import { tagColor } from "../utils/tagColors";
 import { isSystemTag, visibleTags } from "../constants/tags";
 
+function parseBookmarkUrl(rawUrl: string): URL | null {
+  const value = rawUrl.trim();
+  if (!value) return null;
+  try {
+    return new URL(value.startsWith("http") ? value : `https://${value}`);
+  } catch {
+    return null;
+  }
+}
+
+function isAcceptedBookmarkHostname(hostname: string): boolean {
+  if (!hostname) return false;
+  if (hostname === "localhost") return true;
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname)) return true;
+  return hostname.includes(".");
+}
+
 interface Props {
   initial?: Bookmark | null;
   prefill?: { url: string; title: string; favicon: string; description?: string; tags?: string[] };
@@ -59,14 +76,21 @@ export default function BookmarkModal({ initial, prefill, existingTags, onSave, 
 
   // Auto-derive favicon from URL using Google's reliable favicon service
   const handleUrlBlur = () => {
-    if (url) {
-      try {
-        const { hostname } = new URL(url.startsWith("http") ? url : `https://${url}`);
-        setFavicon(`https://www.google.com/s2/favicons?domain=${hostname}&sz=32`);
-      } catch {
-        // Ignore invalid URL while user is typing.
-      }
-    }
+    const parsed = parseBookmarkUrl(url);
+    if (!parsed || !isAcceptedBookmarkHostname(parsed.hostname.toLowerCase().replace(/^www\./, ""))) return;
+    setFavicon(`https://www.google.com/s2/favicons?domain=${parsed.hostname}&sz=32`);
+  };
+
+  const isValidBookmarkUrl = (value: string) => {
+    const parsed = parseBookmarkUrl(value);
+    if (!parsed) return false;
+    const hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    return isAcceptedBookmarkHostname(hostname);
+  };
+
+  const normalizeBookmarkUrl = (value: string) => {
+    const trimmed = value.trim();
+    return trimmed.startsWith("http") ? trimmed : `https://${trimmed}`;
   };
 
   const validate = () => {
@@ -74,12 +98,8 @@ export default function BookmarkModal({ initial, prefill, existingTags, onSave, 
     if (!title.trim()) e.title = "Title is required";
     if (!url.trim()) {
       e.url = "URL is required";
-    } else {
-      try {
-        new URL(url.startsWith("http") ? url : `https://${url}`);
-      } catch {
-        e.url = "Enter a valid URL";
-      }
+    } else if (!isValidBookmarkUrl(url)) {
+      e.url = "Enter a valid URL";
     }
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -87,10 +107,9 @@ export default function BookmarkModal({ initial, prefill, existingTags, onSave, 
 
   const handleSave = () => {
     if (!validate()) return;
-    const normalized = url.startsWith("http") ? url : `https://${url}`;
     onSave({
       title: title.trim(),
-      url: normalized,
+      url: normalizeBookmarkUrl(url),
       favicon,
       description: description.trim() || undefined,
       tags: [...tags, ...systemTags],

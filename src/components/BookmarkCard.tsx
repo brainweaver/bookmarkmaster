@@ -300,7 +300,7 @@ export default function BookmarkCard({
       </a>
 
       {/* Hover action buttons */}
-      {hovered && (
+      {(hovered || deleteConfirming) && (
         <div
           style={{
             position: "absolute",
@@ -344,7 +344,7 @@ export default function BookmarkCard({
             }
           />
           <ActionBtn
-            title={deleteConfirming ? "Click again to confirm" : "Delete"}
+            title={deleteConfirming ? "Delete bookmark" : "Delete"}
             onClick={(e) => {
               e.preventDefault();
               onDelete();

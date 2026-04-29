@@ -970,6 +970,12 @@ export default function App() {
     mode: "bookmark" | "drop";
   } | null>(null);
   const pendingDuplicateResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
+  const [pendingSimilarDuplicate, setPendingSimilarDuplicate] = useState<{
+    title: string;
+    url: string;
+    mode: "bookmark" | "drop";
+  } | null>(null);
+  const pendingSimilarDuplicateResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
 
   // When opened via extension toolbar click or context menu, URL params carry
   // the originating tab's info — auto-open the add modal with it prefilled.
@@ -978,6 +984,7 @@ export default function App() {
       ? null
       : selectedTag;
   const themeLabel = formatThemeLabel(theme);
+  const isNotTaggedBookmark = (b: Bookmark) => !b.tags.includes(ARCHIVED_FILTER) && visibleTags(b.tags).length === 0;
   const filteredAppCatalog = useMemo(() => {
     const query = appSearch.trim().toLowerCase();
     if (!query) return appCatalog;
@@ -1042,6 +1049,23 @@ export default function App() {
     pendingDuplicateResolveRef.current?.(confirmed);
     pendingDuplicateResolveRef.current = null;
     setPendingDuplicate(null);
+  }, []);
+
+  const promptSimilarDuplicateWarning = useCallback((title: string, url: string, mode: "bookmark" | "drop") => {
+    if (pendingSimilarDuplicateResolveRef.current) {
+      pendingSimilarDuplicateResolveRef.current(false);
+      pendingSimilarDuplicateResolveRef.current = null;
+    }
+    return new Promise<boolean>((resolve) => {
+      pendingSimilarDuplicateResolveRef.current = resolve;
+      setPendingSimilarDuplicate({ title, url, mode });
+    });
+  }, []);
+
+  const settleSimilarDuplicateWarning = useCallback((confirmed: boolean) => {
+    pendingSimilarDuplicateResolveRef.current?.(confirmed);
+    pendingSimilarDuplicateResolveRef.current = null;
+    setPendingSimilarDuplicate(null);
   }, []);
 
   useEffect(() => {
@@ -1244,7 +1268,7 @@ export default function App() {
     return bookmarks.filter((b) => {
       const userTags = visibleTags(b.tags);
       const isArchived = b.tags.includes(ARCHIVED_FILTER);
-      if (selectedTag === NOT_TAGGED_FILTER && userTags.length > 0) return false;
+      if (selectedTag === NOT_TAGGED_FILTER && !isNotTaggedBookmark(b)) return false;
       if (selectedTag === NOT_UNIQUE_FILTER && !b.tags.includes(SYSTEM_TAG_NOT_UNIQUE)) return false;
       if (selectedTag === NOT_REACHABLE_FILTER && !b.tags.includes(SYSTEM_TAG_NOT_REACHABLE)) return false;
       if (selectedTag === ARCHIVED_FILTER && !isArchived) return false;
@@ -1293,19 +1317,32 @@ export default function App() {
   const cleanupPercent = cleanupState.running && cleanupState.total > 0
     ? Math.round((cleanupState.progress / cleanupState.total) * 100)
     : 0;
+  const pendingBookmarkDelete = deleteConfirm ? bookmarks.find((b) => b.id === deleteConfirm) ?? null : null;
+  const findDuplicateBookmark = useCallback((url: string, excludeId?: string) => {
+    const exactKey = normaliseUrlForDedupe(url);
+    const similarKey = similarBaseUrlKey(url);
+    const exact = bookmarks.find((b) => b.id !== excludeId && normaliseUrlForDedupe(b.url) === exactKey);
+    if (exact) return { kind: "exact" as const, bookmark: exact };
+    const similar = bookmarks.find((b) => b.id !== excludeId && similarBaseUrlKey(b.url) === similarKey);
+    if (similar) return { kind: "similar" as const, bookmark: similar };
+    return null;
+  }, [bookmarks]);
 
   const handleSave = async (data: Omit<Bookmark, "id" | "addedAt">) => {
     if (modal.mode === "add") {
-      const incomingKey = normaliseUrlForDedupe(data.url);
-      const existing = bookmarks.find((b) => normaliseUrlForDedupe(b.url) === incomingKey);
-      if (existing) {
-        const confirmed = await promptDuplicateOverwrite(existing.title, existing.url, "bookmark");
+      const duplicate = findDuplicateBookmark(data.url);
+      if (duplicate?.kind === "exact") {
+        const confirmed = await promptDuplicateOverwrite(duplicate.bookmark.title, duplicate.bookmark.url, "bookmark");
         if (!confirmed) return;
-        updateBookmark(existing.id, {
+        updateBookmark(duplicate.bookmark.id, {
           ...data,
-          ranking: data.ranking ?? existing.ranking,
+          ranking: data.ranking ?? duplicate.bookmark.ranking,
         });
       } else {
+        if (duplicate?.kind === "similar") {
+          const confirmed = await promptSimilarDuplicateWarning(duplicate.bookmark.title, duplicate.bookmark.url, "bookmark");
+          if (!confirmed) return;
+        }
         addBookmark(data);
       }
     } else if (modal.mode === "edit") {
@@ -1315,13 +1352,7 @@ export default function App() {
   };
 
   const handleDelete = (id: string) => {
-    if (deleteConfirm === id) {
-      removeBookmark(id);
-      setDeleteConfirm(null);
-    } else {
-      setDeleteConfirm(id);
-      setTimeout(() => setDeleteConfirm(null), 3000);
-    }
+    setDeleteConfirm(id);
   };
 
   const columns = gridColumnsFromZoom(zoom);
@@ -1382,28 +1413,33 @@ export default function App() {
         };
       }));
       const valid = items.filter((x): x is NonNullable<typeof x> => x !== null);
-      const byKey = new Map(bookmarks.map((b) => [normaliseUrlForDedupe(b.url), b] as const));
       const toImport: Omit<Bookmark, "id">[] = [];
       let overwritten = 0;
 
       for (const item of valid) {
-        const key = normaliseUrlForDedupe(item.url);
-        const existing = byKey.get(key);
-        if (!existing) {
+        const duplicate = findDuplicateBookmark(item.url);
+        if (!duplicate) {
           toImport.push(item);
           continue;
         }
 
-        const confirmed = await promptDuplicateOverwrite(existing.title, existing.url, "drop");
+        if (duplicate.kind === "similar") {
+          const confirmed = await promptSimilarDuplicateWarning(duplicate.bookmark.title, duplicate.bookmark.url, "drop");
+          if (!confirmed) continue;
+          toImport.push(item);
+          continue;
+        }
+
+        const confirmed = await promptDuplicateOverwrite(duplicate.bookmark.title, duplicate.bookmark.url, "drop");
         if (!confirmed) continue;
 
-        updateBookmark(existing.id, {
+        updateBookmark(duplicate.bookmark.id, {
           title: item.title,
           url: item.url,
           favicon: item.favicon,
           description: item.description,
           tags: item.tags,
-          ranking: existing.ranking,
+          ranking: duplicate.bookmark.ranking,
         });
         overwritten += 1;
       }
@@ -2770,7 +2806,7 @@ export default function App() {
             />
             <TagChip
               label={t("notTagged")}
-              count={bookmarks.filter((b) => visibleTags(b.tags).length === 0).length}
+              count={bookmarks.filter(isNotTaggedBookmark).length}
               active={selectedTag === NOT_TAGGED_FILTER}
               onClick={() => setSelectedTag(selectedTag === NOT_TAGGED_FILTER ? null : NOT_TAGGED_FILTER)}
               onClear={handleClearNotTagged}
@@ -3373,7 +3409,7 @@ export default function App() {
 
             <Divider />
 
-            <button onClick={() => openAddBookmarkModal()} style={{
+            <button onClick={() => openAddBookmarkModal(effectiveSelectedTag)} style={{
               display: "flex", alignItems: "center", gap: 5,
               padding: "6px 12px", background: "#3b82f6", border: "none",
               borderRadius: 7, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer",
@@ -3607,6 +3643,85 @@ export default function App() {
                   }}
                 >
                   Overwrite bookmark
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {pendingSimilarDuplicate && (
+          <div
+            onClick={() => settleSimilarDuplicateWarning(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.65)",
+              backdropFilter: "blur(4px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1110,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "var(--card)",
+                border: "1px solid var(--border-hover)",
+                borderRadius: 14,
+                padding: 24,
+                width: 420,
+                maxWidth: "calc(100vw - 32px)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+                boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
+              }}
+            >
+              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)", lineHeight: 1.3 }}>
+                A similar bookmark already exists.
+              </h2>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13, color: "var(--text-2)", lineHeight: 1.6 }}>
+                <div>Title: {pendingSimilarDuplicate.title || "Untitled"}</div>
+                <div style={{ wordBreak: "break-all" }}>URL: {pendingSimilarDuplicate.url}</div>
+              </div>
+              <p style={{ margin: 0, fontSize: 13, color: "var(--text-2)", lineHeight: 1.6 }}>
+                Add anyway = keep both bookmarks
+                <br />
+                Ignore = cancel
+              </p>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button
+                  onClick={() => settleSimilarDuplicateWarning(false)}
+                  style={{
+                    height: 34,
+                    padding: "0 14px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border-hover)",
+                    background: "var(--card)",
+                    color: "var(--text-2)",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: 600,
+                  }}
+                >
+                  Ignore
+                </button>
+                <button
+                  onClick={() => settleSimilarDuplicateWarning(true)}
+                  style={{
+                    height: 34,
+                    padding: "0 14px",
+                    borderRadius: 8,
+                    border: "1px solid #3b82f6",
+                    background: "#3b82f6",
+                    color: "#fff",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: 700,
+                  }}
+                >
+                  Add anyway
                 </button>
               </div>
             </div>
@@ -3940,13 +4055,98 @@ export default function App() {
                   </div>
                 ))}
               </div>
-            </div>
-          </div>
-        )}
+                </div>
+              </div>
+            )}
 
-        {showDeleteAll && (
-          <div
-            onClick={() => setShowDeleteAll(false)}
+            {pendingBookmarkDelete && (
+              <div
+                onClick={() => setDeleteConfirm(null)}
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  background: "rgba(0,0,0,0.65)",
+                  backdropFilter: "blur(4px)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 1100,
+                }}
+              >
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    background: "var(--card)",
+                    border: "1px solid #ef444440",
+                    borderRadius: 14,
+                    padding: 24,
+                    width: 420,
+                    maxWidth: "calc(100vw - 32px)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 14,
+                    boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
+                  }}
+                >
+                  <h2 style={{ fontSize: 16, fontWeight: 700, color: "#ef4444", margin: 0 }}>
+                    Delete bookmark?
+                  </h2>
+                  <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.6, margin: 0 }}>
+                    This will permanently remove{" "}
+                    <strong style={{ color: "var(--text)" }}>{pendingBookmarkDelete.title}</strong>
+                    {pendingBookmarkDelete.url ? (
+                      <>
+                        {" "}
+                        with URL <strong style={{ color: "var(--text)" }}>{pendingBookmarkDelete.url}</strong>
+                      </>
+                    ) : null}
+                    .
+                  </p>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      onClick={() => setDeleteConfirm(null)}
+                      style={{
+                        flex: 1,
+                        background: "var(--border)",
+                        border: "1px solid var(--border-hover)",
+                        borderRadius: 8,
+                        padding: "9px 0",
+                        color: "var(--text-2)",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSelectedBookmarkIds((prev) => prev.filter((bookmarkId) => bookmarkId !== pendingBookmarkDelete.id));
+                        removeBookmark(pendingBookmarkDelete.id);
+                        setDeleteConfirm(null);
+                      }}
+                      style={{
+                        flex: 1,
+                        background: "#ef4444",
+                        border: "none",
+                        borderRadius: 8,
+                        padding: "9px 0",
+                        color: "#fff",
+                        fontSize: 13,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Delete Bookmark
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showDeleteAll && (
+              <div
+                onClick={() => setShowDeleteAll(false)}
             style={{
               position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)",
               backdropFilter: "blur(4px)", display: "flex",
